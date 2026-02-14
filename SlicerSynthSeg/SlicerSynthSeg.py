@@ -4,47 +4,51 @@ import logging
 import vtk, qt, ctk, slicer
 from slicer.ScriptedLoadableModule import *
 from slicer.util import VTKObservationMixin
-import numpy as np
+import subprocess
+import tempfile
+from pathlib import Path
 
 #
 # SlicerSynthSeg
 #
 
 class SlicerSynthSeg(ScriptedLoadableModule):
-    """Uses ScriptedLoadableModule base class, available at:
-    https://github.com/Slicer/Slicer/blob/master/Base/Python/slicer/ScriptedLoadableModule.py
-    """
+    """Uses ScriptedLoadableModule base class"""
 
     def __init__(self, parent):
         ScriptedLoadableModule.__init__(self, parent)
         self.parent.title = "SynthSeg"
         self.parent.categories = ["Segmentation"]
         self.parent.dependencies = []
-        self.parent.contributors = ["SlicerSynthSeg Team"]
+        self.parent.contributors = ["Prof. Dr. Niyazi Acer (Erciyes University)"]
         self.parent.helpText = """
-        This module performs automated brain MRI segmentation using SynthSeg.
-        It segments brain structures and exports volume measurements.
-        """
+Automated brain MRI segmentation using SynthSeg.
+<br><br>
+<b>Requirements:</b><br>
+1. SynthSeg installation (download from GitHub)<br>
+2. Python environment with TensorFlow, Keras, nibabel<br>
+<br>
+<b>First-time setup:</b><br>
+Click 'Configure Environment' to set paths.
+"""
         self.parent.acknowledgementText = """
-        Based on SynthSeg by BBillot et al.
-        https://github.com/BBillot/SynthSeg
-        """
+Based on SynthSeg by Benjamin Billot et al.<br>
+Implementation: Prof. Dr. Niyazi Acer
+"""
 
 #
 # SlicerSynthSegWidget
 #
 
 class SlicerSynthSegWidget(ScriptedLoadableModuleWidget, VTKObservationMixin):
-    """Uses ScriptedLoadableModuleWidget base class, available at:
-    https://github.com/Slicer/Slicer/blob/master/Base/Python/slicer/ScriptedLoadableModule.py
-    """
+    """Uses ScriptedLoadableModuleWidget base class"""
 
     def __init__(self, parent=None):
         """
         Called when the user opens the module the first time and the widget is initialized.
         """
         ScriptedLoadableModuleWidget.__init__(self, parent)
-        VTKObservationMixin.__init__(self)  # needed for parameter node observation
+        VTKObservationMixin.__init__(self)
         self.logic = None
         self._parameterNode = None
         self._updatingGUIFromParameterNode = False
@@ -55,72 +59,31 @@ class SlicerSynthSegWidget(ScriptedLoadableModuleWidget, VTKObservationMixin):
         """
         ScriptedLoadableModuleWidget.setup(self)
 
-        # Create the main collapsible button
-        parametersCollapsibleButton = ctk.ctkCollapsibleButton()
-        parametersCollapsibleButton.text = "Parameters"
-        self.layout.addWidget(parametersCollapsibleButton)
+        # Load widget from .ui file (created by Designer)
+        uiWidget = slicer.util.loadUI(self.resourcePath('UI/SlicerSynthSeg.ui'))
+        self.layout.addWidget(uiWidget)
+        self.ui = slicer.util.childWidgetVariables(uiWidget)
 
-        # Layout within the collapsible button
-        parametersFormLayout = qt.QFormLayout(parametersCollapsibleButton)
-
-        #
-        # Input volume selector
-        #
-        self.inputVolumeSelector = slicer.qMRMLNodeComboBox()
-        self.inputVolumeSelector.nodeTypes = ["vtkMRMLScalarVolumeNode"]
-        self.inputVolumeSelector.selectNodeUponCreation = True
-        self.inputVolumeSelector.addEnabled = False
-        self.inputVolumeSelector.removeEnabled = False
-        self.inputVolumeSelector.noneEnabled = False
-        self.inputVolumeSelector.showHidden = False
-        self.inputVolumeSelector.showChildNodeTypes = False
-        self.inputVolumeSelector.setMRMLScene(slicer.mrmlScene)
-        self.inputVolumeSelector.setToolTip("Select the input T1 MRI volume")
-        parametersFormLayout.addRow("Input Volume: ", self.inputVolumeSelector)
-
-        #
-        # Output segmentation selector
-        #
-        self.outputSegmentationSelector = slicer.qMRMLNodeComboBox()
-        self.outputSegmentationSelector.nodeTypes = ["vtkMRMLSegmentationNode"]
-        self.outputSegmentationSelector.selectNodeUponCreation = True
-        self.outputSegmentationSelector.addEnabled = True
-        self.outputSegmentationSelector.removeEnabled = True
-        self.outputSegmentationSelector.noneEnabled = True
-        self.outputSegmentationSelector.showHidden = False
-        self.outputSegmentationSelector.showChildNodeTypes = False
-        self.outputSegmentationSelector.setMRMLScene(slicer.mrmlScene)
-        self.outputSegmentationSelector.setToolTip("Select or create output segmentation")
-        parametersFormLayout.addRow("Output Segmentation: ", self.outputSegmentationSelector)
-
-        #
-        # Apply Button
-        #
-        self.applyButton = qt.QPushButton("Run Segmentation")
-        self.applyButton.toolTip = "Run the SynthSeg segmentation algorithm"
-        self.applyButton.enabled = False
-        parametersFormLayout.addRow(self.applyButton)
-
-        #
-        # Status Label
-        #
-        self.statusLabel = qt.QLabel("")
-        self.statusLabel.setWordWrap(True)
-        parametersFormLayout.addRow(self.statusLabel)
+        # Set scene in MRML widgets
+        uiWidget.setMRMLScene(slicer.mrmlScene)
 
         # Create logic class
         self.logic = SlicerSynthSegLogic()
 
         # Connections
-        self.applyButton.connect('clicked(bool)', self.onApplyButton)
-        self.inputVolumeSelector.connect("currentNodeChanged(vtkMRMLNode*)", self.onSelect)
-        self.outputSegmentationSelector.connect("currentNodeChanged(vtkMRMLNode*)", self.onSelect)
+        self.addObserver(slicer.mrmlScene, slicer.mrmlScene.StartCloseEvent, self.onSceneStartClose)
+        self.addObserver(slicer.mrmlScene, slicer.mrmlScene.EndCloseEvent, self.onSceneEndClose)
 
-        # Add vertical spacer
-        self.layout.addStretch(1)
+        # Buttons
+        self.ui.configureButton.connect('clicked(bool)', self.onConfigureButton)
+        self.ui.testConfigButton.connect('clicked(bool)', self.onTestConfiguration)
+        self.ui.applyButton.connect('clicked(bool)', self.onApplyButton)
 
-        # Refresh Apply button state
-        self.onSelect()
+        # Make sure parameter node is initialized
+        self.initializeParameterNode()
+        
+        # Check if configured
+        self.updateConfigurationStatus()
 
     def cleanup(self):
         """
@@ -128,42 +91,231 @@ class SlicerSynthSegWidget(ScriptedLoadableModuleWidget, VTKObservationMixin):
         """
         self.removeObservers()
 
-    def onSelect(self):
+    def enter(self):
         """
-        Update the apply button state based on selections
+        Called each time the user opens this module.
         """
-        self.applyButton.enabled = self.inputVolumeSelector.currentNode() is not None
+        self.initializeParameterNode()
+
+    def exit(self):
+        """
+        Called each time the user opens a different module.
+        """
+        pass
+
+    def onSceneStartClose(self, caller, event):
+        """
+        Called when the scene is about to be closed.
+        """
+        self.setParameterNode(None)
+
+    def onSceneEndClose(self, caller, event):
+        """
+        Called when the scene is closed.
+        """
+        if self.parent.isEntered:
+            self.initializeParameterNode()
+
+    def initializeParameterNode(self):
+        """
+        Ensure parameter node exists and observed.
+        """
+        self.setParameterNode(self.logic.getParameterNode())
+
+    def setParameterNode(self, inputParameterNode):
+        """
+        Set and observe parameter node.
+        """
+        if inputParameterNode:
+            self.logic.setDefaultParameters(inputParameterNode)
+
+        if self._parameterNode is not None:
+            self.removeObserver(self._parameterNode, vtk.vtkCommand.ModifiedEvent, self.updateGUIFromParameterNode)
+        self._parameterNode = inputParameterNode
+        if self._parameterNode is not None:
+            self.addObserver(self._parameterNode, vtk.vtkCommand.ModifiedEvent, self.updateGUIFromParameterNode)
+
+        self.updateGUIFromParameterNode()
+
+    def updateGUIFromParameterNode(self, caller=None, event=None):
+        """
+        Update GUI from parameter node.
+        """
+        if self._parameterNode is None or self._updatingGUIFromParameterNode:
+            return
+
+        self._updatingGUIFromParameterNode = True
+
+        # Update buttons state
+        if self.ui.inputVolumeSelector.currentNode() and self.logic.isConfigured():
+            self.ui.applyButton.enabled = True
+        else:
+            self.ui.applyButton.enabled = False
+
+        self._updatingGUIFromParameterNode = False
+
+    def updateConfigurationStatus(self):
+        """
+        Update configuration status display.
+        """
+        if self.logic.isConfigured():
+            config = self.logic.getConfiguration()
+            self.ui.configStatusLabel.text = f"✓ Configured\nSynthSeg: {config.get('synthseg_path', 'N/A')}\nPython: {config.get('python_path', 'N/A')}"
+            self.ui.configStatusLabel.styleSheet = "color: green;"
+        else:
+            self.ui.configStatusLabel.text = "⚠ Not configured\nClick 'Configure Environment' to set paths"
+            self.ui.configStatusLabel.styleSheet = "color: red;"
+
+    def onConfigureButton(self):
+        """
+        Show configuration dialog.
+        """
+        dialog = ConfigurationDialog(self.logic)
+        if dialog.exec_():
+            self.updateConfigurationStatus()
+            slicer.util.infoDisplay("Configuration saved successfully!")
+
+    def onTestConfiguration(self):
+        """
+        Test current configuration.
+        """
+        if not self.logic.isConfigured():
+            slicer.util.errorDisplay("Please configure environment first!")
+            return
+
+        result, message = self.logic.testConfiguration()
+        if result:
+            slicer.util.infoDisplay(f"✓ Configuration valid!\n\n{message}")
+        else:
+            slicer.util.errorDisplay(f"✗ Configuration error:\n\n{message}")
 
     def onApplyButton(self):
         """
         Run processing when user clicks "Apply" button.
         """
         try:
-            self.applyButton.enabled = False
-            self.statusLabel.text = "Running SynthSeg segmentation... This may take several minutes."
+            # Get input volume
+            inputVolume = self.ui.inputVolumeSelector.currentNode()
+            if not inputVolume:
+                raise ValueError("Please select an input volume")
+
+            # Check configuration
+            if not self.logic.isConfigured():
+                raise ValueError("Please configure environment first!\nClick 'Configure Environment' button.")
+
+            # Disable button during processing
+            self.ui.applyButton.enabled = False
+            self.ui.applyButton.text = "Processing..."
             slicer.app.processEvents()
 
-            # Get input/output nodes
-            inputVolume = self.inputVolumeSelector.currentNode()
-            outputSegmentation = self.outputSegmentationSelector.currentNode()
-            
-            if not outputSegmentation:
-                outputSegmentation = slicer.mrmlScene.AddNewNodeByClass("vtkMRMLSegmentationNode")
-                outputSegmentation.SetName(inputVolume.GetName() + "_SynthSeg")
-                self.outputSegmentationSelector.setCurrentNode(outputSegmentation)
-
             # Run segmentation
-            self.logic.process(inputVolume, outputSegmentation)
+            outputSegmentation = self.logic.process(inputVolume)
 
-            self.statusLabel.text = "Segmentation completed successfully!"
+            # Success message
+            slicer.util.infoDisplay("Segmentation completed successfully!")
 
         except Exception as e:
-            self.statusLabel.text = f"Error: {str(e)}"
-            slicer.util.errorDisplay("Failed to compute results: "+str(e))
+            slicer.util.errorDisplay(f"Failed to compute results: {str(e)}\n\nPlease check:\n1. Configuration is correct\n2. Input image is valid\n3. SynthSeg models are installed")
             import traceback
             traceback.print_exc()
         finally:
-            self.applyButton.enabled = True
+            self.ui.applyButton.enabled = True
+            self.ui.applyButton.text = "Run Segmentation"
+
+
+#
+# Configuration Dialog
+#
+
+class ConfigurationDialog(qt.QDialog):
+    """Configuration dialog for SynthSeg paths"""
+
+    def __init__(self, logic, parent=None):
+        super().__init__(parent)
+        self.logic = logic
+        self.setWindowTitle("Configure SynthSeg Environment")
+        self.setMinimumWidth(600)
+        self.setup()
+        self.loadCurrentConfig()
+
+    def setup(self):
+        layout = qt.QFormLayout(self)
+
+        # Instructions
+        instructions = qt.QLabel(
+            "<b>Setup Instructions:</b><br>"
+            "1. Download SynthSeg from: <a href='https://github.com/BBillot/SynthSeg'>GitHub</a><br>"
+            "2. Create Anaconda environment with TensorFlow, Keras, nibabel<br>"
+            "3. Download model: <a href='https://drive.google.com/file/d/11ZW9ZxaESJk7RkMMVMAjyoGraCXgLwoq/view?usp=sharing'>synthseg_1.0.h5</a> → Save to SynthSeg/models/<br>"
+            "4. Specify paths below"
+        )
+        instructions.setOpenExternalLinks(True)
+        instructions.setWordWrap(True)
+        layout.addRow(instructions)
+
+        # SynthSeg path
+        synthsegLayout = qt.QHBoxLayout()
+        self.synthsegPathEdit = qt.QLineEdit()
+        self.synthsegPathEdit.setPlaceholderText("C:/path/to/SynthSeg")
+        synthsegBrowseButton = qt.QPushButton("Browse...")
+        synthsegBrowseButton.clicked.connect(self.onBrowseSynthSeg)
+        synthsegLayout.addWidget(self.synthsegPathEdit)
+        synthsegLayout.addWidget(synthsegBrowseButton)
+        layout.addRow("SynthSeg Path:", synthsegLayout)
+
+        # Python path
+        pythonLayout = qt.QHBoxLayout()
+        self.pythonPathEdit = qt.QLineEdit()
+        self.pythonPathEdit.setPlaceholderText("C:/anaconda3/envs/synthseg38/python.exe")
+        pythonBrowseButton = qt.QPushButton("Browse...")
+        pythonBrowseButton.clicked.connect(self.onBrowsePython)
+        pythonLayout.addWidget(self.pythonPathEdit)
+        pythonLayout.addWidget(pythonBrowseButton)
+        layout.addRow("Python Executable:", pythonLayout)
+
+        # Buttons
+        buttonLayout = qt.QHBoxLayout()
+        saveButton = qt.QPushButton("Save")
+        saveButton.clicked.connect(self.onSave)
+        cancelButton = qt.QPushButton("Cancel")
+        cancelButton.clicked.connect(self.reject)
+        buttonLayout.addWidget(saveButton)
+        buttonLayout.addWidget(cancelButton)
+        layout.addRow(buttonLayout)
+
+    def loadCurrentConfig(self):
+        """Load current configuration"""
+        config = self.logic.getConfiguration()
+        self.synthsegPathEdit.setText(config.get('synthseg_path', ''))
+        self.pythonPathEdit.setText(config.get('python_path', ''))
+
+    def onBrowseSynthSeg(self):
+        """Browse for SynthSeg directory"""
+        path = qt.QFileDialog.getExistingDirectory(self, "Select SynthSeg Directory")
+        if path:
+            self.synthsegPathEdit.setText(path)
+
+    def onBrowsePython(self):
+        """Browse for Python executable"""
+        path = qt.QFileDialog.getOpenFileName(self, "Select Python Executable", "", "Python (python.exe python)")
+        if path:
+            self.pythonPathEdit.setText(path)
+
+    def onSave(self):
+        """Save configuration"""
+        synthseg_path = self.synthsegPathEdit.text.strip()
+        python_path = self.pythonPathEdit.text.strip()
+
+        if not synthseg_path or not python_path:
+            qt.QMessageBox.warning(self, "Missing Information", "Please provide both paths!")
+            return
+
+        # Validate
+        result, message = self.logic.validateAndSaveConfiguration(synthseg_path, python_path)
+        if result:
+            self.accept()
+        else:
+            qt.QMessageBox.critical(self, "Validation Error", f"Configuration invalid:\n\n{message}")
 
 
 #
@@ -171,130 +323,122 @@ class SlicerSynthSegWidget(ScriptedLoadableModuleWidget, VTKObservationMixin):
 #
 
 class SlicerSynthSegLogic(ScriptedLoadableModuleLogic):
-    """This class should implement all the actual
-    computation done by your module.  The interface
-    should be such that other python code can import
-    this class and make use of the functionality without
-    requiring an instance of the Widget.
-    Uses ScriptedLoadableModuleLogic base class, available at:
-    https://github.com/Slicer/Slicer/blob/master/Base/Python/slicer/ScriptedLoadableModule.py
+    """
+    Segmentation logic.
     """
 
     def __init__(self):
-        """
-        Called when the logic class is instantiated. Can be used for initializing member variables.
-        """
         ScriptedLoadableModuleLogic.__init__(self)
+        self.config = None
+        self.loadConfiguration()
 
-    def setDefaultParameters(self, parameterNode):
-        """
-        Initialize parameter node with default settings.
-        """
-        if not parameterNode.GetParameter("Threshold"):
-            parameterNode.SetParameter("Threshold", "100.0")
+    def loadConfiguration(self):
+        """Load configuration from SynthSegConfig"""
+        try:
+            from SynthSegConfig import SynthSegConfig
+            self.config = SynthSegConfig()
+        except:
+            self.config = None
 
-    def process(self, inputVolume, outputSegmentation):
-        """
-        Run the processing algorithm using SynthSeg.
-        :param inputVolume: volume to be segmented
-        :param outputSegmentation: segmentation result
-        """
-        
-        if not inputVolume or not outputSegmentation:
-            raise ValueError("Input or output volume is invalid")
+    def isConfigured(self):
+        """Check if environment is configured"""
+        if self.config is None:
+            return False
+        return self.config.is_configured()
 
+    def getConfiguration(self):
+        """Get current configuration"""
+        if self.config:
+            return self.config.get_config()
+        return {}
+
+    def validateAndSaveConfiguration(self, synthseg_path, python_path):
+        """Validate and save configuration"""
+        if self.config is None:
+            try:
+                from SynthSegConfig import SynthSegConfig
+                self.config = SynthSegConfig()
+            except Exception as e:
+                return False, f"Failed to load SynthSegConfig: {str(e)}"
+
+        # Validate SynthSeg path
+        valid, msg = self.config.validate_synthseg_path(synthseg_path)
+        if not valid:
+            return False, f"SynthSeg path invalid: {msg}"
+
+        # Validate Python environment
+        valid, msg = self.config.validate_python_env(python_path)
+        if not valid:
+            return False, f"Python environment invalid: {msg}"
+
+        # Save
+        self.config.save_config(synthseg_path, python_path)
+        return True, "Configuration saved"
+
+    def testConfiguration(self):
+        """Test current configuration"""
+        if not self.isConfigured():
+            return False, "Not configured"
+
+        config = self.getConfiguration()
+
+        # Test SynthSeg
+        valid, msg = self.config.validate_synthseg_path(config['synthseg_path'])
+        if not valid:
+            return False, f"SynthSeg: {msg}"
+
+        # Test Python
+        valid, msg = self.config.validate_python_env(config['python_path'])
+        if not valid:
+            return False, f"Python: {msg}"
+
+        return True, "All checks passed!"
+
+    def process(self, inputVolume):
+        """
+        Run the segmentation algorithm.
+        """
         import time
-        import tempfile
-        import subprocess
-        import sys
-        from pathlib import Path
-        import shutil
-        
         startTime = time.time()
         logging.info('Processing started')
 
-        # Create temporary directory
-        temp_dir = Path(tempfile.mkdtemp())
-        input_file = temp_dir / "input.nii.gz"
-        output_file = temp_dir / "segmentation.nii.gz"
-        csv_file = temp_dir / "volumes.csv"
-        
-        try:
-            # Save input volume to file
-            logging.info(f"Saving input volume to: {input_file}")
-            slicer.util.saveNode(inputVolume, str(input_file))
-            
-            # Find synthseg_complete.py script
-            module_dir = Path(__file__).parent
-            synthseg_script = module_dir / "synthseg_complete.py"
-            
-            if not synthseg_script.exists():
-                raise FileNotFoundError(f"SynthSeg script not found at: {synthseg_script}\nPlease ensure synthseg_complete.py is in the module folder.")
-            
-            logging.info(f"Found SynthSeg script at: {synthseg_script}")
-            
-            # Run SynthSeg
-            logging.info("Running SynthSeg segmentation (this may take several minutes)...")
+        # Create temp directory
+        with tempfile.TemporaryDirectory() as tmpDir:
+            tmpPath = Path(tmpDir)
+
+            # Save input volume
+            inputPath = tmpPath / 'input.nii.gz'
+            slicer.util.saveNode(inputVolume, str(inputPath))
+
+            # Get script path
+            scriptPath = Path(__file__).parent / 'synthseg_complete.py'
+
+            # Run segmentation
+            config = self.getConfiguration()
             cmd = [
-                sys.executable,
-                str(synthseg_script),
-                '--input', str(input_file),
-                '--output', str(temp_dir),
-                '--keep-csv'
+                config['python_path'],
+                str(scriptPath),
+                '--input', str(inputPath),
+                '--output', str(tmpPath)
             ]
-            
-            logging.info(f"Command: {' '.join(cmd)}")
-            
-            result = subprocess.run(cmd, check=True, capture_output=True, text=True)
-            logging.info("SynthSeg output:")
-            logging.info(result.stdout)
-            
-            if result.stderr:
-                logging.warning("SynthSeg warnings/errors:")
-                logging.warning(result.stderr)
-            
-            # Load segmentation result
-            if output_file.exists():
-                logging.info(f"Loading segmentation from: {output_file}")
-                segNode = slicer.util.loadSegmentation(str(output_file))
-                
-                if segNode:
-                    # Copy segments to output
-                    outputSegmentation.GetSegmentation().RemoveAllSegments()
-                    for i in range(segNode.GetSegmentation().GetNumberOfSegments()):
-                        segment = segNode.GetSegmentation().GetNthSegment(i)
-                        outputSegmentation.GetSegmentation().AddSegment(segment)
-                    
-                    # Set reference geometry
-                    outputSegmentation.SetReferenceImageGeometryParameterFromVolumeNode(inputVolume)
-                    
-                    # Remove temporary node
-                    slicer.mrmlScene.RemoveNode(segNode)
-                    
-                    logging.info(f'Processing completed successfully in {time.time()-startTime:.2f} seconds')
-                    logging.info(f'Number of segments: {outputSegmentation.GetSegmentation().GetNumberOfSegments()}')
-                else:
-                    raise RuntimeError("Failed to load segmentation file")
-            else:
-                raise RuntimeError(f"Segmentation output not created at: {output_file}")
-                
-        except subprocess.CalledProcessError as e:
-            error_msg = f"SynthSeg processing failed with exit code {e.returncode}\n"
-            error_msg += f"stdout: {e.stdout}\n"
-            error_msg += f"stderr: {e.stderr}"
-            logging.error(error_msg)
-            raise RuntimeError(error_msg)
-        except Exception as e:
-            logging.error(f"SynthSeg processing failed: {str(e)}")
-            raise
-        finally:
-            # Cleanup temporary files
-            try:
-                if temp_dir.exists():
-                    shutil.rmtree(temp_dir)
-                    logging.info("Cleaned up temporary files")
-            except Exception as e:
-                logging.warning(f"Failed to cleanup temporary files: {str(e)}")
+
+            logging.info(f"Running: {' '.join(cmd)}")
+            result = subprocess.run(cmd, capture_output=True, text=True)
+
+            if result.returncode != 0:
+                raise RuntimeError(f"SynthSeg processing failed with exit code {result.returncode}\nstdout: {result.stdout}\nstderr: {result.stderr}")
+
+            # Load segmentation
+            segPath = tmpPath / 'segmentation.nii.gz'
+            if not segPath.exists():
+                raise RuntimeError("Segmentation file not created")
+
+            outputSegmentation = slicer.util.loadSegmentation(str(segPath))
+
+        stopTime = time.time()
+        logging.info(f'Processing completed in {stopTime-startTime:.2f} seconds')
+
+        return outputSegmentation
 
 
 #
@@ -303,29 +447,16 @@ class SlicerSynthSegLogic(ScriptedLoadableModuleLogic):
 
 class SlicerSynthSegTest(ScriptedLoadableModuleTest):
     """
-    This is the test case for your scripted module.
-    Uses ScriptedLoadableModuleTest base class, available at:
-    https://github.com/Slicer/Slicer/blob/master/Base/Python/slicer/ScriptedLoadableModule.py
+    Test cases for SlicerSynthSeg.
     """
 
     def setUp(self):
-        """ Do whatever is needed to reset the state - typically a scene clear will be enough.
-        """
         slicer.mrmlScene.Clear()
 
     def runTest(self):
-        """Run as few or as many tests as needed here.
-        """
         self.setUp()
         self.test_SlicerSynthSeg1()
 
     def test_SlicerSynthSeg1(self):
-        """ Test basic functionality
-        """
-
         self.delayDisplay("Starting the test")
-
-        # Test the module logic
-        logic = SlicerSynthSegLogic()
-
         self.delayDisplay('Test passed')

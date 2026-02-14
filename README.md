@@ -44,6 +44,20 @@ git clone https://github.com/BBillot/SynthSeg.git
 
 **Important:** Remember the path where you cloned SynthSeg - you'll need it in 3D Slicer!
 
+### 4. Download Model File
+
+Download the pre-trained model (~50 MB):
+
+**📥 [Download synthseg_1.0.h5 from Google Drive](https://drive.google.com/file/d/11ZW9ZxaESJk7RkMMVMAjyoGraCXgLwoq/view?usp=sharing)**
+
+**Save to:** `SynthSeg/models/synthseg_1.0.h5`
+
+For example:
+- Windows: `C:\Users\YourName\SynthSeg\models\synthseg_1.0.h5`
+- Mac/Linux: `/home/yourname/SynthSeg/models/synthseg_1.0.h5`
+
+**Note:** Create the `models` folder if it doesn't exist!
+
 ---
 
 ## 🔧 Installation in 3D Slicer
