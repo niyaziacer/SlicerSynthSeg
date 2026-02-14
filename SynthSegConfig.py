@@ -60,10 +60,10 @@ class SynthSegConfig:
         if not path.exists():
             return False, "Directory does not exist"
         
-        # Check for predict script
-        predict_script = path / "SynthSeg" / "predict_synthseg.py"
+        # Check for predict script (correct path)
+        predict_script = path / "scripts" / "commands" / "SynthSeg_predict.py"
         if not predict_script.exists():
-            return False, "SynthSeg/predict_synthseg.py not found"
+            return False, "scripts/commands/SynthSeg_predict.py not found"
         
         # Check for model
         model_dir = path / "models"
