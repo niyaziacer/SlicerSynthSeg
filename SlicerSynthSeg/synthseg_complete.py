@@ -42,7 +42,7 @@ def main():
     
     # Validate input
     if not os.path.exists(args.input):
-        print(f"❌ Error: Input file not found: {args.input}")
+        print(f"ERROR: Error: Input file not found: {args.input}")
         sys.exit(1)
     
     # Create output folder
@@ -54,13 +54,31 @@ def main():
     csv_output = output_dir / 'volumes.csv'
     excel_output = output_dir / 'volumes.xlsx'
     
-    # Find SynthSeg script
-    script_dir = Path(__file__).parent
-    synthseg_script = script_dir / 'SynthSeg' / 'scripts' / 'commands' / 'SynthSeg_predict.py'
+    # Find SynthSeg script - try configuration first
+    synthseg_script = None
+    
+    # Try to load from SynthSegConfig
+    try:
+        from SynthSegConfig import SynthSegConfig
+        config = SynthSegConfig()
+        if config.is_configured():
+            cfg = config.get_config()
+            synthseg_path = Path(cfg['synthseg_path'])
+            synthseg_script = synthseg_path / 'scripts' / 'commands' / 'SynthSeg_predict.py'
+    except:
+        pass
+    
+    # Fallback: check common locations
+    if synthseg_script is None or not synthseg_script.exists():
+        script_dir = Path(__file__).parent
+        synthseg_script = script_dir / 'SynthSeg' / 'scripts' / 'commands' / 'SynthSeg_predict.py'
     
     if not synthseg_script.exists():
-        print(f"❌ Error: SynthSeg not found: {synthseg_script}")
-        print("Please ensure SynthSeg folder is in the same directory.")
+        synthseg_script = Path(r"C:\Users\LENOVO\Desktop\SynthSeg_test\SynthSeg\scripts\commands\SynthSeg_predict.py")
+    
+    if not synthseg_script.exists():
+        print("ERROR: SynthSeg not found!")
+        print("Please configure SynthSeg path in the module settings.")
         sys.exit(1)
     
     print("=" * 70)
@@ -74,8 +92,20 @@ def main():
     print("\n[1/3] Running segmentation...")
     print("(This may take 3-10 minutes on CPU)")
     
+    # Get Python executable from config
+    python_exe = sys.executable
+    
+    try:
+        from SynthSegConfig import SynthSegConfig
+        config = SynthSegConfig()
+        if config.is_configured():
+            cfg = config.get_config()
+            python_exe = cfg.get('python_path', sys.executable)
+    except:
+        pass
+    
     cmd = [
-        sys.executable,
+        python_exe,
         str(synthseg_script),
         '--i', args.input,
         '--o', str(seg_output),
@@ -87,23 +117,23 @@ def main():
     try:
         result = subprocess.run(cmd, check=True, capture_output=False)
     except subprocess.CalledProcessError as e:
-        print(f"❌ Error: Segmentation failed with exit code {e.returncode}")
+        print(f"ERROR: Error: Segmentation failed with exit code {e.returncode}")
         sys.exit(1)
     except KeyboardInterrupt:
-        print("\n❌ Process interrupted by user")
+        print("\nERROR: Process interrupted by user")
         sys.exit(1)
     
     # Verify outputs
     if not seg_output.exists():
-        print(f"❌ Error: Segmentation file not created: {seg_output}")
+        print(f"ERROR: Error: Segmentation file not created: {seg_output}")
         sys.exit(1)
     
     if not csv_output.exists():
-        print(f"❌ Error: CSV file not created: {csv_output}")
+        print(f"ERROR: Error: CSV file not created: {csv_output}")
         sys.exit(1)
     
-    print(f"✓ Segmentation saved: {seg_output}")
-    print(f"✓ CSV saved: {csv_output}")
+    print(f"OK: Segmentation saved: {seg_output}")
+    print(f"OK: CSV saved: {csv_output}")
     
     # Step 2: Convert to Excel
     print("\n[2/3] Converting volumes to Excel...")
@@ -128,14 +158,14 @@ def main():
                 column_letter = chr(65 + idx) if idx < 26 else f"A{chr(65 + idx - 26)}"
                 worksheet.column_dimensions[column_letter].width = min(max_length, 50)
         
-        print(f"✓ Excel saved: {excel_output}")
+        print(f"OK: Excel saved: {excel_output}")
         print(f"  Rows: {len(df)}, Columns: {len(df.columns)}")
         
     except ImportError:
-        print("⚠ Warning: pandas/openpyxl not installed. Excel export skipped.")
+        print("WARNING: Warning: pandas/openpyxl not installed. Excel export skipped.")
         print("Install with: pip install pandas openpyxl")
     except Exception as e:
-        print(f"⚠ Warning: Excel export failed: {e}")
+        print(f"WARNING: Warning: Excel export failed: {e}")
         print("CSV file is still available.")
     
     # Step 3: Cleanup
@@ -143,13 +173,13 @@ def main():
     
     if not args.keep_csv and csv_output.exists() and excel_output.exists():
         csv_output.unlink()
-        print("✓ Removed intermediate CSV file")
+        print("OK: Removed intermediate CSV file")
     elif args.keep_csv:
-        print("✓ Kept CSV file as requested")
+        print("OK: Kept CSV file as requested")
     
     # Summary
     print("\n" + "=" * 70)
-    print("✓ Pipeline Complete!")
+    print("OK: Pipeline Complete!")
     print("=" * 70)
     print(f"Output folder: {output_dir}")
     print(f"  - segmentation.nii.gz  ({seg_output.stat().st_size / 1024:.1f} KB)")
