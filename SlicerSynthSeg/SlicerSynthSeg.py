@@ -252,6 +252,11 @@ class ConfigurationDialog(qt.QDialog):
         instructions.setOpenExternalLinks(True)
         instructions.setWordWrap(True)
         layout.addRow(instructions)
+        
+        # Download model button
+        downloadModelButton = qt.QPushButton("📥 Download Model Automatically")
+        downloadModelButton.clicked.connect(self.onDownloadModel)
+        layout.addRow(downloadModelButton)
 
         # SynthSeg path
         synthsegLayout = qt.QHBoxLayout()
@@ -288,6 +293,64 @@ class ConfigurationDialog(qt.QDialog):
         config = self.logic.getConfiguration()
         self.synthsegPathEdit.setText(config.get('synthseg_path', ''))
         self.pythonPathEdit.setText(config.get('python_path', ''))
+
+    def onDownloadModel(self):
+        """Download model file automatically"""
+        synthseg_path = self.synthsegPathEdit.text.strip()
+        
+        if not synthseg_path:
+            qt.QMessageBox.warning(self, "SynthSeg Path Required", 
+                                 "Please specify SynthSeg path first!")
+            return
+        
+        from pathlib import Path
+        models_dir = Path(synthseg_path) / "models"
+        model_file = models_dir / "synthseg_1.0.h5"
+        
+        # Check if already exists
+        if model_file.exists():
+            reply = qt.QMessageBox.question(self, "Model Exists", 
+                                          f"Model already exists at:\n{model_file}\n\nDownload again?",
+                                          qt.QMessageBox.Yes | qt.QMessageBox.No)
+            if reply == qt.QMessageBox.No:
+                return
+        
+        # Create models directory
+        models_dir.mkdir(parents=True, exist_ok=True)
+        
+        # Download with progress dialog
+        progress = qt.QProgressDialog("Downloading model (50 MB)...", "Cancel", 0, 100, self)
+        progress.setWindowModality(qt.Qt.WindowModal)
+        progress.show()
+        
+        try:
+            import urllib.request
+            
+            # Google Drive direct download link
+            file_id = "11ZW9ZxaESJk7RkMMVMAjyoGraCXgLwoq"
+            url = f"https://drive.google.com/uc?export=download&id={file_id}"
+            
+            def report_progress(block_num, block_size, total_size):
+                if progress.wasCanceled():
+                    raise Exception("Download cancelled")
+                downloaded = block_num * block_size
+                if total_size > 0:
+                    percent = min(int(downloaded * 100 / total_size), 100)
+                    progress.setValue(percent)
+                slicer.app.processEvents()
+            
+            urllib.request.urlretrieve(url, str(model_file), reporthook=report_progress)
+            progress.setValue(100)
+            
+            qt.QMessageBox.information(self, "Success", 
+                                     f"Model downloaded successfully!\n\nSaved to:\n{model_file}")
+            
+        except Exception as e:
+            qt.QMessageBox.critical(self, "Download Failed", 
+                                  f"Failed to download model:\n{str(e)}\n\nPlease download manually from:\n"
+                                  "https://drive.google.com/file/d/11ZW9ZxaESJk7RkMMVMAjyoGraCXgLwoq/view?usp=sharing")
+        finally:
+            progress.close()
 
     def onBrowseSynthSeg(self):
         """Browse for SynthSeg directory"""
@@ -410,16 +473,31 @@ class SlicerSynthSegLogic(ScriptedLoadableModuleLogic):
             # Get script path
             scriptPath = Path(__file__).parent / 'synthseg_complete.py'
 
-            # Run segmentation
+            # Run segmentation with Anaconda activation
             config = self.getConfiguration()
-            cmd = [
-                config['python_path'],
-                str(scriptPath),
-                '--input', str(inputPath),
-                '--output', str(tmpPath)
-            ]
-
-            logging.info(f"Running: {' '.join(cmd)}")
+            
+            if sys.platform == 'win32':
+                # Windows: activate conda env first
+                python_path = Path(config['python_path'])
+                conda_env = python_path.parent.parent  # anaconda3/envs/synthseg38
+                env_name = python_path.parent.name  # synthseg38
+                
+                # Create batch script
+                batch_content = f'''@echo off
+call conda activate {env_name}
+"{config['python_path']}" "{scriptPath}" --input "{inputPath}" --output "{tmpPath}"
+'''
+                batch_file = tmpPath / 'run_synthseg.bat'
+                with open(batch_file, 'w') as f:
+                    f.write(batch_content)
+                
+                cmd = ['cmd.exe', '/c', str(batch_file)]
+                logging.info(f"Running via batch: {batch_file}")
+            else:
+                # Linux/Mac: direct call
+                cmd = [config['python_path'], str(scriptPath), 
+                      '--input', str(inputPath), '--output', str(tmpPath)]
+            
             result = subprocess.run(cmd, capture_output=True, text=True)
 
             if result.returncode != 0:
