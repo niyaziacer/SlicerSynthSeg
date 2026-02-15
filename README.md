@@ -23,15 +23,33 @@ Download from: https://www.anaconda.com/download
 Open **Anaconda Prompt** and run:
 
 ```bash
-# Create environment with Python 3.8
-conda create -n synthseg38 python=3.8 -y
+# Create environment with Python 3.9 (IMPORTANT: Use 3.9, not 3.8!)
+conda create -n synthseg_final python=3.9 -y
 
 # Activate environment
-conda activate synthseg38
+conda activate synthseg_final
 
-# Install required packages
-pip install tensorflow==2.10.0 keras==2.10.0 nibabel scipy "numpy<2"
+# Install TensorFlow and Keras from conda-forge
+conda install -c conda-forge tensorflow=2.10 keras=2.10 -y
+
+# Install other required packages
+pip install nibabel scipy pandas openpyxl
+
+# Fix OpenMP library conflict (CRITICAL!)
+conda env config vars set KMP_DUPLICATE_LIB_OK=TRUE
+
+# Reactivate environment to apply variable
+conda deactivate
+conda activate synthseg_final
+
+# Verify installation
+python -c "import tensorflow, keras, nibabel; print('Installation successful!')"
 ```
+
+**⚠️ Important Notes:**
+- **Must use Python 3.9** (not 3.8 or 3.10)
+- **Must install via conda-forge** (pip versions won't work)
+- **Must set KMP_DUPLICATE_LIB_OK=TRUE** (prevents OpenMP crash)
 
 ### 3. Download SynthSeg
 
@@ -101,7 +119,11 @@ For example:
 
 4. Provide paths:
    - **SynthSeg Path:** `C:\Users\YourName\SynthSeg` (where you cloned SynthSeg)
-   - **Python Environment:** `C:\Users\YourName\anaconda3\envs\synthseg38\python.exe`
+   - **Python Environment:** `C:\Users\YourName\anaconda3\envs\synthseg_final\python.exe`
+   
+   **Example paths:**
+   - Windows: `C:\Users\LENOVO\anaconda3\envs\synthseg_final\python.exe`
+   - Mac/Linux: `/home/username/anaconda3/envs/synthseg_final/bin/python`
    
 5. Click **"Save Configuration"**
 
@@ -141,6 +163,21 @@ All files saved in: `Slicer temporary directory` or specified output folder
 ---
 
 ## 🛠️ Troubleshooting
+
+### "OpenMP library conflict" Error
+
+**Error message:**
+```
+OMP: Error #15: Initializing libomp.dll, but found libiomp5 already initialized.
+```
+
+**Solution:**
+```bash
+conda activate synthseg_final
+conda env config vars set KMP_DUPLICATE_LIB_OK=TRUE
+conda deactivate
+conda activate synthseg_final
+```
 
 ### "SynthSeg not found" Error
 
@@ -215,6 +252,7 @@ Sample T1 MRI images for testing: https://nifti.nimh.nih.gov/
 
 If you use SlicerSynthSeg in your research, please cite:
 
+**SynthSeg:**
 ```
 @article{billot2023synthseg,
   title={SynthSeg: Segmentation of brain MRI scans of any contrast and resolution without retraining},
@@ -222,7 +260,18 @@ If you use SlicerSynthSeg in your research, please cite:
   journal={Medical Image Analysis},
   volume={86},
   pages={102789},
-  year={2023}
+  year={2023},
+  publisher={Elsevier}
+}
+```
+
+**SlicerSynthSeg Extension:**
+```
+@software{slicersynthseg2026,
+  title={SlicerSynthSeg: 3D Slicer Extension for Automated Brain MRI Segmentation},
+  author={Acer, Niyazi},
+  year={2026},
+  url={https://github.com/niyaziacer/SlicerSynthSeg}
 }
 ```
 
