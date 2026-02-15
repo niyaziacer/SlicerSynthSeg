@@ -2,6 +2,12 @@
 
 3D Slicer extension for automated brain MRI segmentation using SynthSeg.
 
+## 📖 **[→ Complete User Guide (Start Here!)](USER_GUIDE.md)** ←
+
+**New users:** Read the [User Guide](USER_GUIDE.md) for step-by-step instructions with screenshots and troubleshooting.
+
+---
+
 ## 🌟 Features
 
 - ✅ Automated whole-brain segmentation (50+ structures)
@@ -13,6 +19,8 @@
 ---
 
 ## 📋 Prerequisites
+
+**👉 [See detailed installation guide in User Guide](USER_GUIDE.md#step-1-install-prerequisites)**
 
 ### 1. Install Anaconda/Miniconda
 
@@ -108,6 +116,8 @@ For example:
 ---
 
 ## 🚀 Usage
+
+**👉 [Complete usage instructions with examples in User Guide](USER_GUIDE.md#-using-slicersynthseg)**
 
 ### First-Time Setup
 
