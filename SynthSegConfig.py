@@ -84,23 +84,28 @@ class SynthSegConfig:
         if not python_path.exists():
             return False, "Python executable not found"
         
-        # Check for required packages
+        # Check for required packages using subprocess
         required_packages = ['tensorflow', 'keras', 'nibabel', 'scipy', 'numpy']
         
         try:
+            # Use the specified Python executable
+            import subprocess
             cmd = [str(python_path), '-c', 
                    'import tensorflow, keras, nibabel, scipy, numpy; print("OK")']
-            result = subprocess.run(cmd, capture_output=True, text=True, timeout=10)
+            result = subprocess.run(cmd, capture_output=True, text=True, timeout=30, 
+                                  creationflags=subprocess.CREATE_NO_WINDOW if hasattr(subprocess, 'CREATE_NO_WINDOW') else 0)
             
             if result.returncode != 0:
                 missing = []
                 for pkg in required_packages:
                     test_cmd = [str(python_path), '-c', f'import {pkg}']
-                    test_result = subprocess.run(test_cmd, capture_output=True, timeout=5)
+                    test_result = subprocess.run(test_cmd, capture_output=True, timeout=10,
+                                               creationflags=subprocess.CREATE_NO_WINDOW if hasattr(subprocess, 'CREATE_NO_WINDOW') else 0)
                     if test_result.returncode != 0:
                         missing.append(pkg)
                 
-                return False, f"Missing packages: {', '.join(missing)}"
+                if missing:
+                    return False, f"Missing packages: {', '.join(missing)}"
             
             return True, "Python environment valid"
             
