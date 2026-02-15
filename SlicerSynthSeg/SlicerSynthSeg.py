@@ -366,14 +366,11 @@ class SlicerSynthSegLogic(ScriptedLoadableModuleLogic):
         if not valid:
             return False, f"SynthSeg path invalid: {msg}"
 
-        # Validate Python environment
-        valid, msg = self.config.validate_python_env(python_path)
-        if not valid:
-            return False, f"Python environment invalid: {msg}"
-
-        # Save
+        # SKIP Python validation - just save and warn
+        # Save configuration regardless of Python validation
         self.config.save_config(synthseg_path, python_path)
-        return True, "Configuration saved"
+        
+        return True, "Configuration saved (Python validation skipped - will be tested during segmentation)"
 
     def testConfiguration(self):
         """Test current configuration"""
