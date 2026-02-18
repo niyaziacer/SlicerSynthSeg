@@ -2,319 +2,220 @@
 
 3D Slicer extension for automated brain MRI segmentation using SynthSeg.
 
-## 📖 **[→ Complete User Guide (Start Here!)](USER_GUIDE.md)** ←
-
-**New users:** Read the [User Guide](USER_GUIDE.md) for step-by-step instructions with screenshots and troubleshooting.
+> ⚠️ **Bu README gerçek test sonuçlarına dayanmaktadır.** Tüm adımlar Windows 10/11 + Anaconda ortamında test edilmiştir.
 
 ---
 
-## 🌟 Features
+## 🌟 Özellikler
 
-- ✅ Automated whole-brain segmentation (50+ structures)
-- ✅ Volume quantification with Excel export
-- ✅ Support for T1, T2, FLAIR sequences
-- ✅ Robust to various contrasts and resolutions
-- ✅ Works with clinical and research MRI data
+- ✅ Otomatik tam beyin segmentasyonu (30+ yapı)
+- ✅ Hacim ölçümü (mm³) ve CSV çıktısı
+- ✅ T1, T2, FLAIR sekansları için destek
+- ✅ Farklı kontrast ve çözünürlüklere karşı dayanıklı
+- ✅ Klinik ve araştırma MRI verilerinde çalışır
 
 ---
 
-## 📋 Prerequisites
+## 📋 Gereksinimler
 
-**👉 [See detailed installation guide in User Guide](USER_GUIDE.md#step-1-install-prerequisites)**
+- Windows 10/11 (64-bit)
+- Anaconda veya Miniconda
+- 3D Slicer 5.x
+- En az 8 GB RAM (16 GB önerilir)
+- GPU opsiyonel (CPU ile ~2-3 dakika)
 
-### 1. Install Anaconda/Miniconda
+---
 
-Download from: https://www.anaconda.com/download
+## ⚙️ Kurulum
 
-### 2. Create SynthSeg Environment
+### 1. Conda Ortamı Oluşturma
 
-Open **Anaconda Prompt** and run:
+Anaconda Prompt'u açın ve aşağıdaki komutları **sırasıyla** çalıştırın:
 
-```bash
-# Create environment with Python 3.9 (IMPORTANT: Use 3.9, not 3.8!)
-conda create -n synthseg_final python=3.9 -y
-
-# Activate environment
-conda activate synthseg_final
-
-# Install TensorFlow and Keras from conda-forge
-conda install -c conda-forge tensorflow=2.10 keras=2.10 -y
-
-# Install other required packages
-pip install nibabel scipy pandas openpyxl
-
-# Fix OpenMP library conflict (CRITICAL!)
-conda env config vars set KMP_DUPLICATE_LIB_OK=TRUE
-
-# Reactivate environment to apply variable
-conda deactivate
-conda activate synthseg_final
-
-# Verify installation
-python -c "import tensorflow, keras, nibabel; print('Installation successful!')"
+```bat
+conda create -n synthseg_v1 python=3.8 -y
+conda activate synthseg_v1
 ```
 
-**⚠️ Important Notes:**
-- **Must use Python 3.9** (not 3.8 or 3.10)
-- **Must install via conda-forge** (pip versions won't work)
-- **Must set KMP_DUPLICATE_LIB_OK=TRUE** (prevents OpenMP crash)
+### 2. Gerekli Paketleri Kurma
 
-### 3. Download SynthSeg
+```bat
+pip install tensorflow==2.2.0 keras==2.3.1 h5py==2.10.0 nibabel==5.0.1 numpy==1.23.5 protobuf==3.20.3 scipy==1.4.1 matplotlib==3.6.2
+```
 
-```bash
-# Clone SynthSeg repository
+> ⚠️ **Kritik:** Paket versiyonları önemlidir. Farklı versiyonlar sessiz çökmelere yol açar.
+
+### 3. OpenMP Çakışmasını Önleme (KRİTİK!)
+
+Bu adımı atlamayın — atlanırsa program sessizce çöker:
+
+```bat
+conda env config vars set KMP_DUPLICATE_LIB_OK=TRUE
+conda deactivate
+conda activate synthseg_v1
+```
+
+### 4. SynthSeg Reposunu İndirme
+
+```bat
+cd C:\Users\KULLANICI\Desktop
 git clone https://github.com/BBillot/SynthSeg.git
-
-# Note the installation path (e.g., C:\Users\YourName\SynthSeg)
 ```
 
-**Important:** Remember the path where you cloned SynthSeg - you'll need it in 3D Slicer!
+### 5. Model Dosyasını İndirme
 
-### 4. Download Model File
+Model dosyası (~53 MB) GitHub'dan indirilir:
 
-Download the pre-trained model (~50 MB):
-
-**📥 [Download synthseg_1.0.h5 from Google Drive](https://drive.google.com/file/d/11ZW9ZxaESJk7RkMMVMAjyoGraCXgLwoq/view?usp=sharing)**
-
-**Save to:** `SynthSeg/models/synthseg_1.0.h5`
-
-For example:
-- Windows: `C:\Users\YourName\SynthSeg\models\synthseg_1.0.h5`
-- Mac/Linux: `/home/yourname/SynthSeg/models/synthseg_1.0.h5`
-
-**Note:** Create the `models` folder if it doesn't exist!
-
----
-
-## 🔧 Installation in 3D Slicer
-
-### Method 1: Extension Manager (Coming Soon)
-
-1. Open **3D Slicer**
-2. Go to **View** → **Extension Manager**
-3. Search for **"SynthSeg"**
-4. Click **Install**
-5. **Restart** Slicer
-
-### Method 2: Manual Installation (Current)
-
-1. Download this repository:
-   ```
-   git clone https://github.com/niyaziacer/SlicerSynthSeg.git
-   ```
-
-2. Open **3D Slicer**
-
-3. Go to **Edit** → **Application Settings** → **Modules**
-
-4. Click **Add** next to "Additional module paths"
-
-5. Select the `SlicerSynthSeg` folder
-
-6. Click **OK** and **Restart** Slicer
-
----
-
-## 🚀 Usage
-
-**👉 [Complete usage instructions with examples in User Guide](USER_GUIDE.md#-using-slicersynthseg)**
-
-### First-Time Setup
-
-1. Open **3D Slicer**
-
-2. Select **SlicerSynthSeg** from the module dropdown
-
-3. Click **"Configure Environment"**
-
-4. Provide paths:
-   - **SynthSeg Path:** `C:\Users\YourName\SynthSeg` (where you cloned SynthSeg)
-   - **Python Environment:** `C:\Users\YourName\anaconda3\envs\synthseg_final\python.exe`
-   
-   **Example paths:**
-   - Windows: `C:\Users\LENOVO\anaconda3\envs\synthseg_final\python.exe`
-   - Mac/Linux: `/home/username/anaconda3/envs/synthseg_final/bin/python`
-   
-5. Click **"Save Configuration"**
-
-### Running Segmentation
-
-1. **Load** your T1 MRI image in Slicer
-
-2. Open **SlicerSynthSeg** module
-
-3. **Input Volume:** Select your loaded MRI
-
-4. **Output:**
-   - Segmentation name (default: auto-generated)
-   - Export volumes to Excel ✅
-
-5. Click **"Run Segmentation"**
-
-6. Wait 3-10 minutes (depending on CPU speed)
-
-7. **Results:**
-   - Segmentation overlay appears on image
-   - Volume table shows in Slicer
-   - Excel file saved to output directory
-
----
-
-## 📊 Output Files
-
-After segmentation completes:
-
-- **Segmentation file:** `[InputName]_synthseg.nii.gz`
-- **Volume CSV:** `[InputName]_volumes.csv`
-- **Volume Excel:** `[InputName]_volumes.xlsx`
-
-All files saved in: `Slicer temporary directory` or specified output folder
-
----
-
-## 🛠️ Troubleshooting
-
-### "OpenMP library conflict" Error
-
-**Error message:**
-```
-OMP: Error #15: Initializing libomp.dll, but found libiomp5 already initialized.
+```bat
+curl -L -o "C:\Users\KULLANICI\Desktop\SynthSeg\models\synthseg_1.0.h5" "https://github.com/BBillot/SynthSeg/raw/master/models/synthseg_1.0.h5"
 ```
 
-**Solution:**
-```bash
-conda activate synthseg_final
+İndirme sonrası boyutun ~53 MB olduğunu doğrulayın:
+
+```bat
+dir "C:\Users\KULLANICI\Desktop\SynthSeg\models\synthseg_1.0.h5"
+```
+
+> ℹ️ Bu model SynthSeg 1.0 içindir. `--v1` bayrağı ile kullanılır.
+
+---
+
+## 🚀 Kullanım
+
+### Komut Satırından Çalıştırma
+
+```bat
+conda activate synthseg_v1
+
+python C:\Users\KULLANICI\Desktop\SynthSeg\scripts\commands\SynthSeg_predict.py ^
+  --i "C:\Users\KULLANICI\Desktop\T1.nii.gz" ^
+  --o "C:\Users\KULLANICI\Desktop\T1_seg.nii.gz" ^
+  --vol "C:\Users\KULLANICI\Desktop\T1_vol.csv" ^
+  --cpu --v1
+```
+
+**Parametreler:**
+
+| Parametre | Açıklama |
+|-----------|----------|
+| `--i` | Girdi MRI dosyası (.nii.gz) |
+| `--o` | Çıktı segmentasyon dosyası |
+| `--vol` | Hacim CSV çıktısı (opsiyonel) |
+| `--cpu` | CPU ile çalıştır (GPU yoksa) |
+| `--v1` | SynthSeg 1.0 modelini kullan |
+| `--crop 160` | Hızlı mod – sadece merkezi kırpar |
+| `--threads 4` | CPU thread sayısı |
+
+### 3D Slicer'da Kullanım
+
+1. 3D Slicer'ı açın
+2. `Edit → Application Settings → Modules → Additional module paths` kısmına `SlicerSynthSeg` klasörünü ekleyin
+3. Slicer'ı yeniden başlatın
+4. Modüller listesinden **SlicerSynthSeg**'i seçin
+5. Ayarlar:
+   - **SynthSeg Path:** `C:\Users\KULLANICI\Desktop\SynthSeg`
+   - **Python Path:** `C:\Users\KULLANICI\anaconda3\envs\synthseg_v1\python.exe`
+6. Girdi MRI'ı yükleyin ve **Run Segmentation**'a tıklayın
+
+---
+
+## 🧠 Segmente Edilen Yapılar
+
+### Subkortikal Yapılar
+
+| Label | Yapı | Label | Yapı |
+|-------|------|-------|------|
+| 2 | Sol Serebral Beyaz Madde | 41 | Sağ Serebral Beyaz Madde |
+| 3 | Sol Serebral Korteks | 42 | Sağ Serebral Korteks |
+| 4 | Sol Lateral Ventrikül | 43 | Sağ Lateral Ventrikül |
+| 5 | Sol İnf. Lateral Ventrikül | 44 | Sağ İnf. Lateral Ventrikül |
+| 7 | Sol Serebellum Beyaz Madde | 46 | Sağ Serebellum Beyaz Madde |
+| 8 | Sol Serebellum Korteksi | 47 | Sağ Serebellum Korteksi |
+| 10 | Sol Talamus | 49 | Sağ Talamus |
+| 11 | Sol Kaudat | 50 | Sağ Kaudat |
+| 12 | Sol Putamen | 51 | Sağ Putamen |
+| 13 | Sol Pallidum | 52 | Sağ Pallidum |
+| 17 | Sol Hipokampus | 53 | Sağ Hipokampus |
+| 18 | Sol Amigdala | 54 | Sağ Amigdala |
+| 26 | Sol Akkumbens | 58 | Sağ Akkumbens |
+| 28 | Sol Ventral DC | 60 | Sağ Ventral DC |
+
+### Orta Hat / Diğer
+
+| Label | Yapı |
+|-------|------|
+| 14 | 3. Ventrikül |
+| 15 | 4. Ventrikül |
+| 16 | Beyin Sapı |
+| 24 | BOS (yalnızca SynthSeg 2.0) |
+
+---
+
+## 🛠️ Sorun Giderme
+
+### Program `predicting 1/1` Sonrası Sessizce Kapanıyor
+
+**Neden:** `KMP_DUPLICATE_LIB_OK=TRUE` ayarlanmamış.
+
+**Çözüm:**
+```bat
+conda activate synthseg_v1
 conda env config vars set KMP_DUPLICATE_LIB_OK=TRUE
 conda deactivate
-conda activate synthseg_final
+conda activate synthseg_v1
 ```
 
-### "SynthSeg not found" Error
+### `AssertionError: The provided model path does not exist`
 
-**Solution:** Check paths in Configuration:
-- SynthSeg folder must contain `SynthSeg/predict_synthseg.py`
-- Python path must point to `synthseg38` environment
+**Neden:** Model dosyası yanlış konumda.
 
-### "Module not loaded" Error
-
-**Solution:** 
-1. Go to **Edit** → **Application Settings** → **Modules**
-2. Verify SlicerSynthSeg path is listed
-3. Restart 3D Slicer
-
-### Segmentation Takes Too Long
-
-**Solutions:**
-- ✅ Use `--fast` mode (less accurate but 2x faster)
-- ✅ Close other applications
-- ✅ Use GPU if available (requires CUDA setup)
-
-### "TensorFlow not found" Error
-
-**Solution:** Reinstall packages in Anaconda environment:
-
-```bash
-conda activate synthseg38
-pip uninstall tensorflow keras
-pip install tensorflow==2.10.0 keras==2.10.0
+**Çözüm:** Dosyanın şu konumda olduğunu doğrulayın:
+```
+SynthSeg\models\synthseg_1.0.h5
 ```
 
----
+### `OSError: Unable to open file (file signature not found)`
 
-## 📚 Documentation
+**Neden:** Model dosyası Git LFS pointer'ı — gerçek model değil.
 
-### Segmented Structures
+**Çözüm:** Model dosyasını `curl` ile indirin (Kurulum → Adım 5).
 
-SynthSeg segments **50+ brain structures** including:
+### `TypeError: predict() got an unexpected keyword argument`
 
-- Cortical regions (frontal, temporal, parietal, occipital lobes)
-- Subcortical structures (hippocampus, amygdala, thalamus, putamen, caudate)
-- White matter regions
-- Ventricles
-- Cerebellum
-- Brainstem
+**Neden:** Yanlış parametre ismi veya yanlış ortam.
 
-### Volume Quantification
-
-Output includes:
-- **Volume (mm³)** for each structure
-- **Volume (cm³)** conversion
-- **Total intracranial volume (ICV)**
-- Hemisphere-specific measurements
-
----
-
-## 🧪 Test Dataset
-
-Sample T1 MRI images for testing: https://nifti.nimh.nih.gov/
-
----
-
-## 🔗 References
-
-- **SynthSeg Paper:** Billot et al., 2023 - *Robust machine learning segmentation for large-scale analysis of heterogeneous clinical brain MRI datasets*
-- **Original Repository:** https://github.com/BBillot/SynthSeg
-- **3D Slicer:** https://www.slicer.org
-
----
-
-## 📝 Citation
-
-If you use SlicerSynthSeg in your research, please cite:
-
-**SynthSeg:**
-```
-@article{billot2023synthseg,
-  title={SynthSeg: Segmentation of brain MRI scans of any contrast and resolution without retraining},
-  author={Billot, Benjamin and Greve, Douglas N and Puonti, Oula and Thielscher, Axel and Van Leemput, Koen and Fischl, Bruce and Dalca, Adrian V and Iglesias, Juan Eugenio},
-  journal={Medical Image Analysis},
-  volume={86},
-  pages={102789},
-  year={2023},
-  publisher={Elsevier}
-}
+**Çözüm:** `synthseg_v1` ortamını aktif ettiğinizden emin olun:
+```bat
+conda activate synthseg_v1
 ```
 
-**SlicerSynthSeg Extension:**
-```
-@software{slicersynthseg2026,
-  title={SlicerSynthSeg: 3D Slicer Extension for Automated Brain MRI Segmentation},
-  author={Acer, Niyazi},
-  year={2026},
-  url={https://github.com/niyaziacer/SlicerSynthSeg}
-}
-```
+### Çıktı Dosyası Oluşmadı Ama Hata da Yok
+
+**Neden:** `--` (çift tire) yerine `–` (uzun tire) kullanılmış — kopyala-yapıştırda oluşan yaygın hata.
+
+**Çözüm:** `--cpu`, `--v1` gibi parametreleri **elle yazın**, kopyalamayın.
 
 ---
 
-## 🤝 Contributing
+## 📊 Çıktı Dosyaları
 
-Contributions welcome! Please open an issue or pull request.
-
----
-
-## 📄 License
-
-MIT License - see [LICENSE.txt](LICENSE.txt)
+| Dosya | Açıklama |
+|-------|----------|
+| `*_seg.nii.gz` | Segmentasyon maskesi |
+| `*_vol.csv` | Her yapı için hacim (mm³) |
 
 ---
 
-## 👨‍💻 Author
+## 📚 Atıf
 
-**Prof. Dr. Niyazi Acer**
-- Email: acerniyazi@gmail.com
-- Website: https://niyaziacer.github.io
+Bu araç kullanılıyorsa lütfen şu makaleyi atıf olarak gösterin:
 
----
-
-## ⚠️ Disclaimer
-
-This software is for **research purposes only**. Not intended for clinical diagnosis. Always verify results with expert analysis.
+> SynthSeg: Segmentation of brain MRI scans of any contrast and resolution without retraining  
+> B. Billot, D.N. Greve, O. Puonti, A. Thielscher, K. Van Leemput, B. Fischl, A.V. Dalca, J.E. Iglesias  
+> Medical Image Analysis (2023)
 
 ---
 
-## 🆘 Support
+## 📄 Lisans
 
-- **Issues:** https://github.com/niyaziacer/SlicerSynthSeg/issues
-- **Email:** acerniyazi@gmail.com
-- **Documentation:** https://niyaziacer.github.io/SlicerSynthSeg
+MIT License — Ayrıntılar için `LICENSE.txt` dosyasına bakın.
