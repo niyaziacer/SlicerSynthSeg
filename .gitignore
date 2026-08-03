@@ -42,3 +42,6 @@ test_output/
 results/
 *.csv
 *.xlsx
+
+# Bundled SynthSeg model weights (downloaded via gdown at first run, not committed)
+SynthSeg/models/*.h5

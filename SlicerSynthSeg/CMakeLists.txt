@@ -1,23 +1,21 @@
-@"
 #-----------------------------------------------------------------------------
 set(MODULE_NAME SlicerSynthSeg)
 
 #-----------------------------------------------------------------------------
 set(MODULE_PYTHON_SCRIPTS
-  `${MODULE_NAME}.py
-  synthseg_complete.py
+  ${MODULE_NAME}.py
+  SynthSegConfig.py
   __init__.py
   )
 
 set(MODULE_PYTHON_RESOURCES
-  Resources/Icons/`${MODULE_NAME}.png
+  Resources/UI/${MODULE_NAME}.ui
   )
 
 #-----------------------------------------------------------------------------
 slicerMacroBuildScriptedModule(
-  NAME `${MODULE_NAME}
-  SCRIPTS `${MODULE_PYTHON_SCRIPTS}
-  RESOURCES `${MODULE_PYTHON_RESOURCES}
+  NAME ${MODULE_NAME}
+  SCRIPTS ${MODULE_PYTHON_SCRIPTS}
+  RESOURCES ${MODULE_PYTHON_RESOURCES}
   WITH_GENERIC_TESTS
   )
-"@ | Out-File -FilePath "C:\Users\LENOVO\Desktop\SynthSeg_test\SlicerSynthSegPublic\SlicerSynthSeg\CMakeLists.txt" -Encoding UTF8
