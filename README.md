@@ -73,4 +73,4 @@ If you use this tool in research, please cite:
 
 ## Author
 
-Prof. Dr. Niyazi Acer (Erciyes University)
+Prof. Dr. Niyazi Acer (Retired, Erciyes University)
