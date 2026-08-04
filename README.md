@@ -1,4 +1,5 @@
 # SlicerSynthSeg
+![Segmentation result](docs/screenshot.jpeg)
 
 3D Slicer extension for automated brain MRI segmentation using SynthSeg.
 Contrast-agnostic (T1, FLAIR, T2). Outputs labeled brain structures + volumes.
