@@ -56,6 +56,39 @@ SYNTHSEG_THREADS = "4"
 SYNTHSEG_V1_MODEL_DRIVE_ID = "11ZW9ZxaESJk7RkMMVMAjyoGraCXgLwoq"
 SYNTHSEG_V1_MODEL_DRIVE_VIEW_URL = f"https://drive.google.com/file/d/{SYNTHSEG_V1_MODEL_DRIVE_ID}/view?usp=sharing"
 
+# Official download location of the SynthSeg 2.0 models (from the SynthSeg README, BBillot/SynthSeg).
+# The 2.0 models are not redistributed by this extension: they are taken from the user's FreeSurfer
+# installation ($FREESURFER_HOME/models) or downloaded by the user from this link.
+SYNTHSEG_OFFICIAL_MODELS_URL = (
+    "https://liveuclac-my.sharepoint.com/:f:/g/personal/rmappmb_ucl_ac_uk/"
+    "EtlNnulBSUtAvOP6S99KcAIBYzze7jTPsmFk2_iHqKDjEw?e=rBP0RO"
+)
+
+# Model choices: (label shown in the panel, CLI flags, model files needed in SynthSeg/models)
+SYNTHSEG_MODES = {
+    "v1": ("SynthSeg 1.0", ["--v1"], ["synthseg_1.0.h5"]),
+    "v2": ("SynthSeg 2.0", [], ["synthseg_2.0.h5"]),
+    "v2parc": ("SynthSeg 2.0 + cortical parcellation", ["--parc"], ["synthseg_2.0.h5", "synthseg_parc_2.0.h5"]),
+}
+ALL_MODEL_FILES = ["synthseg_1.0.h5", "synthseg_2.0.h5", "synthseg_parc_2.0.h5"]
+
+
+def findModelFolders():
+    """Folders that may already hold SynthSeg models: $FREESURFER_HOME/models and, on Windows, a FreeSurfer
+    installed inside WSL (wsl.localhost/DISTRO/home/USER/freesurfer/models)."""
+    import glob
+    found = []
+    fs = os.environ.get("FREESURFER_HOME")
+    if fs:
+        found.append(Path(fs) / "models")
+    if os.name == "nt":
+        for root in (r"\\wsl.localhost", r"\\wsl$"):
+            try:
+                found += [Path(p) for p in glob.glob(root + r"\*\home\*\freesurfer\models")]
+            except Exception:
+                pass
+    return [p for p in found if p.is_dir() and any((p / f).exists() for f in ALL_MODEL_FILES)]
+
 
 #
 # SlicerSynthSeg
@@ -78,10 +111,16 @@ Automated brain MRI segmentation using SynthSeg.
 2. Python environment with TensorFlow, Keras, nibabel<br>
 <br>
 <b>First-time setup:</b><br>
-Click 'Configure Environment' to set paths.
+Click 'Configure Environment' to set paths.<br>
+<br>
+<b>Models:</b> SynthSeg 1.0 can be downloaded from the configuration dialog. SynthSeg 2.0 and the cortical
+parcellation need synthseg_2.0.h5 and synthseg_parc_2.0.h5: use 'Import models from folder' in the
+configuration dialog and point it to your FreeSurfer models folder, or to the folder where you saved the
+files from the official SynthSeg download link.
 """
         self.parent.acknowledgementText = """
-Based on SynthSeg by Benjamin Billot et al.<br>
+Based on SynthSeg by Benjamin Billot et al. Please cite Billot et al., Medical Image Analysis 2023;
+if you use SynthSeg 2.0 cortical parcellation, also cite Billot et al., PNAS 2023.<br>
 Implementation: Prof. Dr. Niyazi Acer
 """
 
@@ -114,6 +153,19 @@ class SlicerSynthSegWidget(ScriptedLoadableModuleWidget):
         self.ui.applyButton.connect('clicked(bool)', self.onApplyButton)
         self.ui.inputVolumeSelector.connect('currentNodeChanged(vtkMRMLNode*)', self.updateApplyButtonState)
 
+        # model selector (added in code so the .ui file stays unchanged)
+        self.modelCombo = qt.QComboBox()
+        for key, (label, _, _) in SYNTHSEG_MODES.items():
+            self.modelCombo.addItem(label, key)
+        saved = qt.QSettings().value("SlicerSynthSeg/mode", "v1")
+        idx = self.modelCombo.findData(saved)
+        self.modelCombo.setCurrentIndex(idx if idx >= 0 else 0)
+        self.modelCombo.setToolTip("SynthSeg 2.0 + cortical parcellation gives the labels needed by "
+                                   "SlicerCisternaVolumetry (extra-ventricular CSF, parahippocampal and "
+                                   "entorhinal cortex).")
+        self.modelCombo.connect('currentIndexChanged(int)', self.onModelChanged)
+        self.ui.parametersCollapsibleButton.layout().insertRow(1, "Model:", self.modelCombo)
+
         self.updateConfigurationStatus()
 
     def cleanup(self):
@@ -124,6 +176,12 @@ class SlicerSynthSegWidget(ScriptedLoadableModuleWidget):
 
     def exit(self):
         pass
+
+    def currentMode(self):
+        return self.modelCombo.itemData(self.modelCombo.currentIndex) or "v1"
+
+    def onModelChanged(self, index):
+        qt.QSettings().setValue("SlicerSynthSeg/mode", self.currentMode())
 
     def updateApplyButtonState(self, node=None):
         self.ui.applyButton.enabled = bool(self.ui.inputVolumeSelector.currentNode()) and self.logic.isConfigured()
@@ -168,7 +226,7 @@ class SlicerSynthSegWidget(ScriptedLoadableModuleWidget):
             self.ui.applyButton.text = "Processing..."
             slicer.app.processEvents()
 
-            segmentationNode, tableNode = self.logic.process(inputVolume)
+            segmentationNode, tableNode = self.logic.process(inputVolume, self.currentMode())
 
             self.ui.volumeTableView.setMRMLTableNode(tableNode)
             self.ui.resultsCollapsibleButton.collapsed = False
@@ -210,15 +268,22 @@ class ConfigurationDialog(qt.QDialog):
             "3. Model: click 'Download Model Automatically' below, OR download "
             f"<a href='{SYNTHSEG_V1_MODEL_DRIVE_VIEW_URL}'>synthseg_1.0.h5</a> manually "
             "and place it in SynthSeg/models/<br>"
-            "4. Specify paths below"
+            "4. For SynthSeg 2.0 / cortical parcellation: click 'Import models from folder' and choose your "
+            "FreeSurfer <i>models</i> folder, or the folder where you saved synthseg_2.0.h5 and "
+            f"synthseg_parc_2.0.h5 from the <a href='{SYNTHSEG_OFFICIAL_MODELS_URL}'>official SynthSeg download</a><br>"
+            "5. Specify paths below"
         )
         instructions.setOpenExternalLinks(True)
         instructions.setWordWrap(True)
         layout.addRow(instructions)
 
-        downloadModelButton = qt.QPushButton("📥 Download Model Automatically")
+        downloadModelButton = qt.QPushButton("📥 Download Model Automatically (SynthSeg 1.0)")
         downloadModelButton.clicked.connect(self.onDownloadModel)
         layout.addRow(downloadModelButton)
+
+        importModelsButton = qt.QPushButton("📂 Import models from folder (SynthSeg 2.0 / parcellation)")
+        importModelsButton.clicked.connect(self.onImportModels)
+        layout.addRow(importModelsButton)
 
         synthsegLayout = qt.QHBoxLayout()
         self.synthsegPathEdit = qt.QLineEdit()
@@ -345,6 +410,49 @@ class ConfigurationDialog(qt.QDialog):
         qt.QMessageBox.information(self, "Success",
                                  f"Model downloaded and verified successfully!\n\nSaved to:\n{model_file}")
 
+    def onImportModels(self):
+        """Copy SynthSeg model files from a folder (FreeSurfer models, or the user's download folder) into
+        SynthSeg/models, where SynthSeg_predict.py looks for them."""
+        import shutil
+        synthseg_path = self.synthsegPathEdit.text.strip()
+        if not synthseg_path:
+            qt.QMessageBox.warning(self, "SynthSeg Path Required", "Please specify SynthSeg path first!")
+            return
+        candidates = findModelFolders()
+        start = str(candidates[0]) if candidates else ""
+        if candidates:
+            msg = "Found SynthSeg models here:\n" + "\n".join(str(c) for c in candidates) + "\n\nUse the first one?"
+            if qt.QMessageBox.question(self, "Models found", msg, qt.QMessageBox.Yes | qt.QMessageBox.No) == qt.QMessageBox.Yes:
+                folder = start
+            else:
+                folder = qt.QFileDialog.getExistingDirectory(self, "Select folder with SynthSeg models", start)
+        else:
+            folder = qt.QFileDialog.getExistingDirectory(self, "Select folder with SynthSeg models (.h5)")
+        if not folder:
+            return
+        models_dir = Path(synthseg_path) / "models"
+        models_dir.mkdir(parents=True, exist_ok=True)
+        copied, missing = [], []
+        for name in ALL_MODEL_FILES:
+            src = Path(folder) / name
+            if not src.exists():
+                missing.append(name)
+                continue
+            dst = models_dir / name
+            if dst.exists() and dst.stat().st_size == src.stat().st_size:
+                copied.append(name + " (already present)")
+                continue
+            ok, why = self._validateDownloadedModel(src)
+            if not ok:
+                missing.append(f"{name} (invalid: {why})")
+                continue
+            shutil.copy2(str(src), str(dst))
+            copied.append(name)
+        text = "Copied to " + str(models_dir) + ":\n  " + ("\n  ".join(copied) if copied else "nothing")
+        if missing:
+            text += "\n\nNot found in the selected folder:\n  " + "\n  ".join(missing)
+        qt.QMessageBox.information(self, "Import models", text)
+
     def onBrowseSynthSeg(self):
         path = qt.QFileDialog.getExistingDirectory(self, "Select SynthSeg Directory")
         if path:
@@ -436,7 +544,7 @@ class SlicerSynthSegLogic(ScriptedLoadableModuleLogic):
 
         return True, "All checks passed!"
 
-    def _resolveAndValidatePaths(self):
+    def _resolveAndValidatePaths(self, mode="v1"):
         """Re-validate python.exe / SynthSeg_predict.py / model right before running,
         in case the on-disk state changed since the config was saved."""
         config = self.getConfiguration()
@@ -453,14 +561,36 @@ class SlicerSynthSegLogic(ScriptedLoadableModuleLogic):
                 f"not found under {synthseg_path}"
             )
 
-        model_path = synthseg_path / "models" / "synthseg_1.0.h5"
-        if not model_path.exists():
+        label, _, needed = SYNTHSEG_MODES[mode]
+        missing = [m for m in needed if not (synthseg_path / "models" / m).exists()]
+        if missing:
             raise RuntimeError(
-                f"Model file not found: {model_path}\n"
-                f"Please download synthseg_1.0.h5 and place it in {synthseg_path / 'models'}"
+                f"{label} needs these model files in {synthseg_path / 'models'}:\n  " + "\n  ".join(missing) +
+                "\n\nOpen 'Configure Environment' and use 'Import models from folder' (FreeSurfer models folder, "
+                "or the files downloaded from the official SynthSeg link)."
             )
 
         return python_path, predict_script
+
+    def _labelNames(self, mode):
+        """Label names for the chosen model: the fixed v1 table, or the names shipped with SynthSeg
+        (segmentation 2.0 + parcellation) read from SynthSeg/data/labels_classes_priors."""
+        if mode == "v1":
+            return SYNTHSEG_V1_LABELS
+        import numpy as np
+        d = Path(self.getConfiguration()['synthseg_path']) / "data" / "labels_classes_priors"
+        names = {}
+        try:
+            for lab_f, name_f in (("synthseg_segmentation_labels_2.0.npy", "synthseg_segmentation_names_2.0.npy"),
+                                  ("synthseg_parcellation_labels.npy", "synthseg_parcellation_names.npy")):
+                for l, n in zip(np.load(str(d / lab_f)).tolist(), np.load(str(d / name_f)).tolist()):
+                    if l > 0 and l not in names:
+                        names[int(l)] = str(n)
+        except Exception as e:
+            logging.warning(f"Could not read SynthSeg label names ({e}); using v1 names")
+            names = dict(SYNTHSEG_V1_LABELS)
+        names.setdefault(24, "CSF")
+        return names
 
     def _buildColorTableNode(self, labelNames):
         """Build a small color table so segments get real anatomical names on import."""
@@ -480,7 +610,7 @@ class SlicerSynthSegLogic(ScriptedLoadableModuleLogic):
             colorNode.SetColor(labelValue, name, r, g, b, 1.0)
         return colorNode
 
-    def process(self, inputVolume):
+    def process(self, inputVolume, mode="v1"):
         """
         Run SynthSeg on inputVolume by calling the conda env's python.exe directly
         (no conda activate) and load the results back into the scene.
@@ -492,7 +622,9 @@ class SlicerSynthSegLogic(ScriptedLoadableModuleLogic):
         startTime = time.time()
         logging.info('SynthSeg processing started')
 
-        python_path, predict_script = self._resolveAndValidatePaths()
+        if mode not in SYNTHSEG_MODES:
+            mode = "v1"
+        python_path, predict_script = self._resolveAndValidatePaths(mode)
 
         with tempfile.TemporaryDirectory() as tmpDir:
             tmpPath = Path(tmpDir)
@@ -508,9 +640,9 @@ class SlicerSynthSegLogic(ScriptedLoadableModuleLogic):
                 "--i", str(inputPath),
                 "--o", str(segPath),
                 "--vol", str(volCsvPath),
-                "--v1", "--cpu",
+                "--cpu",
                 "--threads", SYNTHSEG_THREADS,
-            ]
+            ] + SYNTHSEG_MODES[mode][1]
 
             env = os.environ.copy()
             env["KMP_DUPLICATE_LIB_OK"] = "TRUE"
@@ -554,11 +686,11 @@ class SlicerSynthSegLogic(ScriptedLoadableModuleLogic):
                 raise RuntimeError("SynthSeg did not produce a volumes CSV output file.")
 
             labelmapVolumeNode = slicer.util.loadLabelVolume(str(segPath))
-            colorNode = self._buildColorTableNode(SYNTHSEG_V1_LABELS)
+            colorNode = self._buildColorTableNode(self._labelNames(mode))
             labelmapVolumeNode.GetDisplayNode().SetAndObserveColorNodeID(colorNode.GetID())
 
             segmentationNode = slicer.mrmlScene.AddNewNodeByClass("vtkMRMLSegmentationNode")
-            segmentationNode.SetName(f"{inputVolume.GetName()}_segmentation")
+            segmentationNode.SetName(f"{inputVolume.GetName()}_synthseg_{mode}")
             segmentationNode.CreateDefaultDisplayNodes()
             slicer.modules.segmentations.logic().ImportLabelmapToSegmentationNode(
                 labelmapVolumeNode, segmentationNode
