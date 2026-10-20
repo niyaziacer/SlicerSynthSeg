@@ -66,11 +66,11 @@ class SynthSegConfig:
         if not model_dir.exists():
             return False, "models directory not found"
 
-        model_v1 = model_dir / "synthseg_1.0.h5"
-        if not model_v1.exists():
-            return False, "synthseg_1.0.h5 model not found in models/"
+        present = [m for m in ("synthseg_1.0.h5", "synthseg_2.0.h5", "synthseg_parc_2.0.h5") if (model_dir / m).exists()]
+        if not present:
+            return False, "no SynthSeg model (.h5) found in models/ (download 1.0 or import 2.0 models)"
 
-        return True, "SynthSeg installation valid"
+        return True, "SynthSeg installation valid (models: " + ", ".join(present) + ")"
 
     def validate_python_env(self, python_path):
         """Validate Python environment - only check if executable exists"""
