@@ -178,7 +178,8 @@ MODULE_DIR = Path(__file__).resolve().parent
 def bundledSynthSegPath():
     """The SynthSeg source shipped with this extension: next to the module (installed extension) or one level
     up (source checkout). Returns None if not found."""
-    for candidate in (MODULE_DIR / "SynthSeg", MODULE_DIR.parent / "SynthSeg"):
+    for candidate in (MODULE_DIR / "SlicerSynthSegLib" / "SynthSeg",  # installed extension (see CMakeLists.txt)
+                      MODULE_DIR / "SynthSeg", MODULE_DIR.parent / "SynthSeg"):  # source checkout
         if (candidate / "scripts" / "commands" / "SynthSeg_predict.py").exists():
             return candidate
     return None

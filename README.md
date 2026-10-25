@@ -17,6 +17,11 @@ No conda or separate Python installation is needed.
 
 ### 1. Install the extension in 3D Slicer
 
+From the **Extensions Manager** (once the extension is in the Slicer Extensions Index): search for
+**SynthSeg**, install it and restart Slicer.
+
+Or from source:
+
 - Clone or download this repository
 - In Slicer: **Edit > Application Settings > Modules > Additional module paths**
 - Add the path to the `SlicerSynthSeg/SlicerSynthSeg` folder
