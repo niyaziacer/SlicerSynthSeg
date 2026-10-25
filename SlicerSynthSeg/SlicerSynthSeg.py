@@ -494,9 +494,9 @@ class SlicerSynthSegLogic(ScriptedLoadableModuleLogic):
         self.loadConfiguration()
 
     def loadConfiguration(self):
-        """Load configuration from SynthSegConfig (same directory as this module)"""
+        """Load configuration from SlicerSynthSegLib/synthseg_config.py"""
         try:
-            from SynthSegConfig import SynthSegConfig
+            from SlicerSynthSegLib.synthseg_config import SynthSegConfig
             self.config = SynthSegConfig()
         except Exception as e:
             logging.error(f"Failed to load SynthSegConfig: {e}")
@@ -515,7 +515,7 @@ class SlicerSynthSegLogic(ScriptedLoadableModuleLogic):
     def validateAndSaveConfiguration(self, synthseg_path, python_path):
         if self.config is None:
             try:
-                from SynthSegConfig import SynthSegConfig
+                from SlicerSynthSegLib.synthseg_config import SynthSegConfig
                 self.config = SynthSegConfig()
             except Exception as e:
                 return False, f"Failed to load SynthSegConfig: {str(e)}"

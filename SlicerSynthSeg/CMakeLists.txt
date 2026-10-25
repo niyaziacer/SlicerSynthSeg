@@ -4,8 +4,8 @@ set(MODULE_NAME SlicerSynthSeg)
 #-----------------------------------------------------------------------------
 set(MODULE_PYTHON_SCRIPTS
   ${MODULE_NAME}.py
-  SynthSegConfig.py
-  __init__.py
+  SlicerSynthSegLib/__init__.py
+  SlicerSynthSegLib/synthseg_config.py
   )
 
 set(MODULE_PYTHON_RESOURCES
