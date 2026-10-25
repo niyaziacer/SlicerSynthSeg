@@ -3,6 +3,9 @@ import time
 import logging
 import subprocess
 import tempfile
+import csv
+import hashlib
+import urllib.request
 import colorsys
 from pathlib import Path
 
@@ -64,6 +67,32 @@ SYNTHSEG_OFFICIAL_MODELS_URL = (
     "EtlNnulBSUtAvOP6S99KcAIBYzze7jTPsmFk2_iHqKDjEw?e=rBP0RO"
 )
 
+# Automatic model download. The SynthSeg authors (B. Billot, J.E. Iglesias) allowed this extension to
+# redistribute the models (e-mail, 23 Oct 2026). Sources are tried in order and every file must match
+# its SHA-256 before it is used, so a partial download or a Google Drive warning page is never accepted.
+MODEL_RELEASE_URL = "https://github.com/niyaziacer/SlicerSynthSeg/releases/download/models-v1"
+MODEL_RELEASE_PAGE = "https://github.com/niyaziacer/SlicerSynthSeg/releases/tag/models-v1"
+MODEL_SHA256 = {
+    "synthseg_1.0.h5": "7d2e32d298fe38dc51ea38e6a8e8fc5c665d56b63cddb409e8b199535f8b5298",
+    "synthseg_2.0.h5": "f190bfd742f450ef3ca2c9df9ed4d2e0232b3a74471da5e51b7770bacdf80c3e",
+    "synthseg_parc_2.0.h5": "83bb1de76fb6f173c6dacacd433f81209fc6abb1dbc179a930ec06ecabbeb684",
+}
+# Google Drive mirror (file ids); None = no mirror for that file yet.
+MODEL_DRIVE_IDS = {
+    "synthseg_1.0.h5": SYNTHSEG_V1_MODEL_DRIVE_ID,
+    "synthseg_2.0.h5": None,
+    "synthseg_parc_2.0.h5": None,
+}
+
+# Citation written into every exported volume table (requested by the SynthSeg authors)
+CITATION_MEDIA = "Billot B et al., SynthSeg, Medical Image Analysis 2023"
+CITATION_PNAS = "Billot B et al., SynthSeg 2.0, PNAS 2023"
+SYNTHSEG_CITATIONS = {
+    "v1": CITATION_MEDIA,
+    "v2": CITATION_MEDIA + "; " + CITATION_PNAS,
+    "v2parc": CITATION_MEDIA + "; " + CITATION_PNAS,
+}
+
 # Model choices: (label shown in the panel, CLI flags, model files needed in SynthSeg/models)
 SYNTHSEG_MODES = {
     "v1": ("SynthSeg 1.0", ["--v1"], ["synthseg_1.0.h5"]),
@@ -71,6 +100,66 @@ SYNTHSEG_MODES = {
     "v2parc": ("SynthSeg 2.0 + cortical parcellation", ["--parc"], ["synthseg_2.0.h5", "synthseg_parc_2.0.h5"]),
 }
 ALL_MODEL_FILES = ["synthseg_1.0.h5", "synthseg_2.0.h5", "synthseg_parc_2.0.h5"]
+
+
+class DownloadCancelled(Exception):
+    pass
+
+
+def fileSha256(path):
+    h = hashlib.sha256()
+    with open(path, "rb") as f:
+        for chunk in iter(lambda: f.read(1 << 20), b""):
+            h.update(chunk)
+    return h.hexdigest()
+
+
+def modelSources(name):
+    """(source label, URL) pairs for one model file, in the order they are tried."""
+    sources = [("GitHub", f"{MODEL_RELEASE_URL}/{name}")]
+    driveId = MODEL_DRIVE_IDS.get(name)
+    if driveId:
+        sources.append(("Google Drive",
+                        f"https://drive.usercontent.google.com/download?id={driveId}&export=download&confirm=t"))
+    return sources
+
+
+def downloadModelFile(name, dest, progress=None):
+    """Download one model into dest, trying every source until one gives a file with the expected
+    SHA-256. progress(sourceLabel, bytesDone, bytesTotal) may return False to cancel.
+    Returns (ok, message)."""
+    dest = Path(dest)
+    part = dest.with_name(dest.name + ".part")
+    expected = MODEL_SHA256[name]
+    errors = []
+    for label, url in modelSources(name):
+        try:
+            req = urllib.request.Request(url, headers={"User-Agent": "SlicerSynthSeg"})
+            h, done = hashlib.sha256(), 0
+            with urllib.request.urlopen(req, timeout=60) as r, open(part, "wb") as f:
+                total = int(r.headers.get("Content-Length") or 0)
+                while True:
+                    chunk = r.read(1 << 20)
+                    if not chunk:
+                        break
+                    f.write(chunk)
+                    h.update(chunk)
+                    done += len(chunk)
+                    if progress and progress(label, done, total) is False:
+                        raise DownloadCancelled()
+            if h.hexdigest() != expected:
+                errors.append(f"{label}: file did not match the expected SHA-256 ({done / 2**20:.1f} MB received)")
+                continue
+            os.replace(part, dest)
+            return True, f"downloaded from {label}"
+        except DownloadCancelled:
+            raise
+        except Exception as e:
+            errors.append(f"{label}: {e}")
+        finally:
+            if part.exists():
+                part.unlink()
+    return False, "; ".join(errors)
 
 
 def findModelFolders():
@@ -265,23 +354,24 @@ class ConfigurationDialog(qt.QDialog):
             "<b>Setup Instructions:</b><br>"
             "1. Download SynthSeg from: <a href='https://github.com/BBillot/SynthSeg'>GitHub</a><br>"
             "2. Create a conda environment with TensorFlow, Keras, nibabel<br>"
-            "3. Model: click 'Download Model Automatically' below, OR download "
-            f"<a href='{SYNTHSEG_V1_MODEL_DRIVE_VIEW_URL}'>synthseg_1.0.h5</a> manually "
-            "and place it in SynthSeg/models/<br>"
-            "4. For SynthSeg 2.0 / cortical parcellation: click 'Import models from folder' and choose your "
-            "FreeSurfer <i>models</i> folder, or the folder where you saved synthseg_2.0.h5 and "
-            f"synthseg_parc_2.0.h5 from the <a href='{SYNTHSEG_OFFICIAL_MODELS_URL}'>official SynthSeg download</a><br>"
+            "3. Models: click 'Download models automatically' below (SynthSeg 1.0, 2.0 and cortical "
+            "parcellation, about 50 MB each, checked with SHA-256).<br>"
+            "&nbsp;&nbsp;&nbsp;If the download is blocked on your network, download the .h5 files from "
+            f"<a href='{MODEL_RELEASE_PAGE}'>this page</a> on another connection, or use your FreeSurfer "
+            "<i>models</i> folder, then click 'Import models from folder'<br>"
+            "4. The models are by B. Billot, J.E. Iglesias et al. and are redistributed with their "
+            "permission; please cite SynthSeg (see Help)<br>"
             "5. Specify paths below"
         )
         instructions.setOpenExternalLinks(True)
         instructions.setWordWrap(True)
         layout.addRow(instructions)
 
-        downloadModelButton = qt.QPushButton("📥 Download Model Automatically (SynthSeg 1.0)")
+        downloadModelButton = qt.QPushButton("📥 Download models automatically (SynthSeg 1.0 / 2.0 / parcellation)")
         downloadModelButton.clicked.connect(self.onDownloadModel)
         layout.addRow(downloadModelButton)
 
-        importModelsButton = qt.QPushButton("📂 Import models from folder (SynthSeg 2.0 / parcellation)")
+        importModelsButton = qt.QPushButton("📂 Import models from folder (offline / FreeSurfer)")
         importModelsButton.clicked.connect(self.onImportModels)
         layout.addRow(importModelsButton)
 
@@ -350,65 +440,58 @@ class ConfigurationDialog(qt.QDialog):
 
     def onDownloadModel(self):
         synthseg_path = self.synthsegPathEdit.text.strip()
-
         if not synthseg_path:
-            qt.QMessageBox.warning(self, "SynthSeg Path Required",
-                                 "Please specify SynthSeg path first!")
+            qt.QMessageBox.warning(self, "SynthSeg Path Required", "Please specify SynthSeg path first!")
             return
 
         models_dir = Path(synthseg_path) / "models"
-        model_file = models_dir / "synthseg_1.0.h5"
-
-        if model_file.exists():
-            reply = qt.QMessageBox.question(self, "Model Exists",
-                                          f"Model already exists at:\n{model_file}\n\nDownload again?",
-                                          qt.QMessageBox.Yes | qt.QMessageBox.No)
-            if reply == qt.QMessageBox.No:
-                return
-
         models_dir.mkdir(parents=True, exist_ok=True)
+        # A file already present is kept: it may be a valid copy imported from FreeSurfer.
+        wanted = [n for n in ALL_MODEL_FILES
+                  if not ((models_dir / n).exists() and (models_dir / n).stat().st_size > 10 * 2**20)]
+        if not wanted:
+            if qt.QMessageBox.question(self, "Models present",
+                                       f"All model files are already in:\n{models_dir}\n\nDownload them again?",
+                                       qt.QMessageBox.Yes | qt.QMessageBox.No) == qt.QMessageBox.No:
+                return
+            wanted = list(ALL_MODEL_FILES)
 
-        try:
-            gdown = self._ensurePackageInstalled("gdown")
-        except Exception as e:
-            qt.QMessageBox.critical(self, "gdown Not Available",
-                                  f"Could not install/import gdown:\n{str(e)}\n\n"
-                                  f"Please download the model manually from:\n{SYNTHSEG_V1_MODEL_DRIVE_VIEW_URL}\n"
-                                  f"and place it at:\n{model_file}")
-            return
-
-        progress = qt.QProgressDialog("Downloading model (~50 MB) with gdown...", "Cancel", 0, 0, self)
+        progress = qt.QProgressDialog("", "Cancel", 0, 100, self)
+        progress.setWindowTitle("Downloading SynthSeg models")
         progress.setWindowModality(qt.Qt.WindowModal)
+        progress.setMinimumDuration(0)
         progress.show()
-        slicer.app.processEvents()
 
+        done, failed = [], []
         try:
-            url = f"https://drive.google.com/uc?id={SYNTHSEG_V1_MODEL_DRIVE_ID}"
-            gdown.download(url, str(model_file), quiet=False, fuzzy=True)
-        except Exception as e:
+            for i, name in enumerate(wanted, 1):
+                def cb(source, got, total, name=name, i=i):
+                    progress.setLabelText(f"{name} ({i}/{len(wanted)}) from {source}\n"
+                                          f"{got / 2**20:.1f}" + (f" / {total / 2**20:.1f}" if total else "") + " MB")
+                    if total:
+                        progress.setValue(int(got * 100 / total))
+                    slicer.app.processEvents()
+                    return not progress.wasCanceled
+                ok, msg = downloadModelFile(name, models_dir / name, cb)
+                (done if ok else failed).append(f"{name}: {msg}")
+        except DownloadCancelled:
             progress.close()
-            if model_file.exists():
-                model_file.unlink()
-            qt.QMessageBox.critical(self, "Download Failed",
-                                  f"gdown download failed:\n{str(e)}\n\n"
-                                  f"Please download manually from:\n{SYNTHSEG_V1_MODEL_DRIVE_VIEW_URL}\n"
-                                  f"and save it to:\n{model_file}")
+            qt.QMessageBox.information(self, "Download cancelled", "Download cancelled. Nothing was saved for the current file.")
             return
         finally:
             progress.close()
 
-        valid, msg = self._validateDownloadedModel(model_file)
-        if not valid:
-            if model_file.exists():
-                model_file.unlink()
-            qt.QMessageBox.critical(self, "Download Verification Failed",
-                                  f"{msg}\n\n"
-                                  f"Please download the model manually from:\n{SYNTHSEG_V1_MODEL_DRIVE_VIEW_URL}\n"
-                                  f"and save it to:\n{model_file}")
-            return
-
-        qt.QMessageBox.information(self, "Success",
-                                 f"Model downloaded and verified successfully!\n\nSaved to:\n{model_file}")
+        text = ""
+        if done:
+            text += "Downloaded and verified (SHA-256):\n  " + "\n  ".join(done) + "\n\n"
+        if failed:
+            text += ("Could not download:\n  " + "\n  ".join(failed) + "\n\n"
+                     "If your network blocks these sites (common on university/hospital networks):\n"
+                     f"1. On another connection, download the .h5 files from\n   {MODEL_RELEASE_PAGE}\n"
+                     "2. Click 'Import models from folder' and choose the folder with the files.")
+            qt.QMessageBox.warning(self, "Model download", text.strip())
+        else:
+            qt.QMessageBox.information(self, "Model download", text.strip() + f"\n\nSaved to:\n{models_dir}")
 
     def onImportModels(self):
         """Copy SynthSeg model files from a folder (FreeSurfer models, or the user's download folder) into
@@ -610,6 +693,21 @@ class SlicerSynthSegLogic(ScriptedLoadableModuleLogic):
             colorNode.SetColor(labelValue, name, r, g, b, 1.0)
         return colorNode
 
+    def _annotateVolumeCsv(self, csvPath, subjectName, mode):
+        """Put the volume name in the subject column (SynthSeg writes the temporary file name) and add the
+        model used and the SynthSeg citation to every row, so they survive when tables are merged."""
+        with open(csvPath, newline="", encoding="utf-8") as f:
+            rows = list(csv.reader(f))
+        if not rows:
+            return
+        rows[0] += ["synthseg_model", "citation"]
+        for row in rows[1:]:
+            if row:
+                row[0] = subjectName
+                row += [SYNTHSEG_MODES[mode][0], SYNTHSEG_CITATIONS[mode]]
+        with open(csvPath, "w", newline="", encoding="utf-8") as f:
+            csv.writer(f).writerows(rows)
+
     def process(self, inputVolume, mode="v1"):
         """
         Run SynthSeg on inputVolume by calling the conda env's python.exe directly
@@ -699,6 +797,7 @@ class SlicerSynthSegLogic(ScriptedLoadableModuleLogic):
             slicer.mrmlScene.RemoveNode(labelmapVolumeNode)
             slicer.mrmlScene.RemoveNode(colorNode)
 
+            self._annotateVolumeCsv(volCsvPath, inputVolume.GetName(), mode)
             tableNode = slicer.util.loadTable(str(volCsvPath))
             tableNode.SetName(f"{inputVolume.GetName()}_volumes")
 

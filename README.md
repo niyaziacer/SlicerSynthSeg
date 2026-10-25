@@ -18,7 +18,7 @@ Contrast-agnostic (T1, FLAIR, T2). Outputs labeled brain structures + volumes.
 ```bash
 conda create -n synthseg python=3.8 -y
 conda activate synthseg
-pip install tensorflow tf-keras "numpy<2" scipy nibabel gdown
+pip install tensorflow tf-keras "numpy<2" scipy nibabel
 ```
 
 > Note: this modern recipe was verified working today — the old TF 2.2 package is
@@ -39,23 +39,23 @@ pip install tensorflow tf-keras "numpy<2" scipy nibabel gdown
   - **Python Executable**: path to your conda env `python.exe`
     (e.g. `C:/Users/.../anaconda3/envs/synthseg/python.exe`)
   - **SynthSeg Path**: path to the bundled `SynthSeg` folder (included in this repo)
-- Click **"Download Model Automatically"** (downloads `synthseg_1.0.h5` via gdown, ~50 MB)
+- Click **"Download models automatically"**. It downloads `synthseg_1.0.h5`, `synthseg_2.0.h5`
+  and `synthseg_parc_2.0.h5` (about 50 MB each) and checks each file against its SHA-256.
 - Click **"Test Configuration"** to verify
 
-#### SynthSeg 2.0 and cortical parcellation (optional)
+#### Model files
 
-SynthSeg 2.0 and the cortical parcellation need two more model files, `synthseg_2.0.h5`
-and `synthseg_parc_2.0.h5`. They are not redistributed by this extension. Get them in
-one of two ways:
+The SynthSeg models are by B. Billot, J.E. Iglesias and colleagues. They are redistributed in the
+[models-v1 release](https://github.com/niyaziacer/SlicerSynthSeg/releases/tag/models-v1) of this
+repository with the authors' permission (e-mail, 23 October 2026). The extension downloads them from
+GitHub, falls back to a Google Drive mirror, and accepts a file only if its SHA-256 matches.
 
-- **If FreeSurfer 7.3 or later is installed** (also inside WSL), they are already in
-  `$FREESURFER_HOME/models`.
-- **Otherwise**, download the two files from the
-  [official SynthSeg model folder](https://liveuclac-my.sharepoint.com/:f:/g/personal/rmappmb_ucl_ac_uk/EtlNnulBSUtAvOP6S99KcAIBYzze7jTPsmFk2_iHqKDjEw?e=rBP0RO)
-  (link from the SynthSeg README) into any folder.
+If your network blocks these sites (common on university and hospital networks):
 
-Then, in **Configure Environment**, click **"Import models from folder"** and choose that
-folder. The files are copied into `SynthSeg/models/`.
+- download the `.h5` files from the release page on another connection, or take them from
+  `$FREESURFER_HOME/models` (FreeSurfer 7.3 or later, also inside WSL);
+- in **Configure Environment**, click **"Import models from folder"** and choose that folder.
+  The files are copied into `SynthSeg/models/`.
 
 ### 4. Run segmentation
 
@@ -73,7 +73,8 @@ folder. The files are copied into `SynthSeg/models/`.
 ## Notes
 
 - CPU processing takes a few minutes per scan
-- The model is downloaded automatically (not included in the repo due to size)
+- Models are downloaded on first use (not included in the repository because of their size)
+- The exported volume table names the input volume and adds the model used and the SynthSeg citation to every row
 - Segments are automatically named (Left-Thalamus, Right-Caudate, etc.)
 
 ## License & Acknowledgements
