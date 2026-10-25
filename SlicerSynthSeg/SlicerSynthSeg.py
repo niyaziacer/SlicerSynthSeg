@@ -793,7 +793,9 @@ class SlicerSynthSegLogic(ScriptedLoadableModuleLogic):
             python_path = Path(config['python_path'])
             if not python_path.exists():
                 raise RuntimeError(f"Python executable not found: {python_path}")
-            python_cmd = [str(python_path)]
+            # The same launcher maps keras -> tf_keras when the environment has TensorFlow 2.16+
+            # and leaves older environments (e.g. TF 2.4) unchanged.
+            python_cmd = [str(python_path), str(MODULE_DIR / "SlicerSynthSegLib" / "run_synthseg_tfkeras.py")]
 
         synthseg_path = Path(config['synthseg_path'])
         predict_script = synthseg_path / "scripts" / "commands" / "SynthSeg_predict.py"

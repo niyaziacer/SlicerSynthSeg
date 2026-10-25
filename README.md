@@ -7,41 +7,49 @@ Contrast-agnostic (T1, FLAIR, T2). Outputs labeled brain structures + volumes.
 ## Requirements
 
 - 3D Slicer 5.x
-- Miniconda or Anaconda
 - ~8 GB RAM minimum (16 GB recommended)
 - CPU is sufficient (GPU not required)
+- Internet access on the first run (TensorFlow, about 600 MB; models, about 50 MB each)
+
+No conda or separate Python installation is needed.
 
 ## Installation
 
-### 1. Create the conda environment (in PowerShell/terminal, once)
-
-```bash
-conda create -n synthseg python=3.8 -y
-conda activate synthseg
-pip install tensorflow tf-keras "numpy<2" scipy nibabel
-```
-
-> Note: this modern recipe was verified working today — the old TF 2.2 package is
-> no longer available via pip on Windows, and this combination produces the same
-> result.
-
-### 2. Install the extension in 3D Slicer
+### 1. Install the extension in 3D Slicer
 
 - Clone or download this repository
 - In Slicer: **Edit > Application Settings > Modules > Additional module paths**
 - Add the path to the `SlicerSynthSeg/SlicerSynthSeg` folder
 - Restart Slicer
 
-### 3. Configure the environment (first time)
+### 2. First run
 
-- Open the **SynthSeg** module (Segmentation category)
-- Click **"Configure Environment"**:
-  - **Python Executable**: path to your conda env `python.exe`
-    (e.g. `C:/Users/.../anaconda3/envs/synthseg/python.exe`)
-  - **SynthSeg Path**: path to the bundled `SynthSeg` folder (included in this repo)
-- Click **"Download models automatically"**. It downloads `synthseg_1.0.h5`, `synthseg_2.0.h5`
-  and `synthseg_parc_2.0.h5` (about 50 MB each) and checks each file against its SHA-256.
-- Click **"Test Configuration"** to verify
+- Open the **SynthSeg** module (Segmentation category). The status shows **Configured**: the bundled
+  `SynthSeg` folder is found automatically.
+- Load a volume and click **"Run Segmentation"**. On the first run the extension offers to:
+  - install `tensorflow==2.21` and `tf-keras==2.21` into Slicer's Python (once, a few minutes;
+    numpy is kept at its current version). SynthSeg then runs in a separate `PythonSlicer` process.
+  - download the model files the selected model needs (checked against their SHA-256).
+
+> Results were checked against the original environment (Python 3.8, TensorFlow 2.4.1): on a T1 scan with
+> SynthSeg 2.0 + parcellation, 100.0000% voxel agreement and at most 0.007% difference in regional volumes.
+
+> Note: installing TensorFlow can change versions of packages it shares with other extensions
+> (in our test, h5py 3.16.0 became 3.14.0; TotalSegmentator and OpenMAP-T1 kept working).
+> If another extension stops working after this, please open an issue.
+
+### 3. Advanced: use your own Python / conda environment
+
+If you prefer an existing environment, open **"Configure Environment"**, choose
+**"Custom Python / conda environment"** and give its `python.exe`. A working recipe:
+
+```bash
+conda create -n synthseg python=3.12 -y
+conda activate synthseg
+pip install "tensorflow==2.21.*" "tf-keras==2.21.*" scipy nibabel
+```
+
+Configurations saved by earlier versions (with a Python path) keep using that Python.
 
 #### Model files
 
