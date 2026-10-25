@@ -6,6 +6,7 @@ set(MODULE_PYTHON_SCRIPTS
   ${MODULE_NAME}.py
   SlicerSynthSegLib/__init__.py
   SlicerSynthSegLib/synthseg_config.py
+  SlicerSynthSegLib/run_synthseg_tfkeras.py
   )
 
 set(MODULE_PYTHON_RESOURCES

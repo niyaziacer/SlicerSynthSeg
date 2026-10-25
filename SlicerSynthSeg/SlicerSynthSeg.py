@@ -3,6 +3,8 @@ import time
 import logging
 import subprocess
 import tempfile
+import shutil
+import importlib.util
 import csv
 import hashlib
 import urllib.request
@@ -49,6 +51,14 @@ SYNTHSEG_V1_LABELS = {
     54: "Right-Amygdala",
     58: "Right-Accumbens-area",
     60: "Right-VentralDC",
+}
+
+# TensorFlow installed into Slicer's own Python for the default engine. Pinned to the version that was
+# verified against the original TF 2.4.1 environment (see SlicerSynthSegLib/run_synthseg_tfkeras.py).
+SLICER_TF_REQUIREMENTS = ["tensorflow==2.21.*", "tf-keras==2.21.*"]
+ENGINE_LABELS = {
+    "slicer": "Slicer's Python (recommended, no conda needed)",
+    "custom": "Custom Python / conda environment",
 }
 
 # Fixed CLI invocation parameters for the proven-working Windows method
@@ -162,6 +172,86 @@ def downloadModelFile(name, dest, progress=None):
     return False, "; ".join(errors)
 
 
+MODULE_DIR = Path(__file__).resolve().parent
+
+
+def bundledSynthSegPath():
+    """The SynthSeg source shipped with this extension: next to the module (installed extension) or one level
+    up (source checkout). Returns None if not found."""
+    for candidate in (MODULE_DIR / "SynthSeg", MODULE_DIR.parent / "SynthSeg"):
+        if (candidate / "scripts" / "commands" / "SynthSeg_predict.py").exists():
+            return candidate
+    return None
+
+
+def pythonSlicerPath():
+    """PythonSlicer: Slicer's Python interpreter as a separate process (TensorFlow then never loads into the
+    Slicer application itself)."""
+    found = shutil.which("PythonSlicer")
+    if found:
+        return found
+    exe = "PythonSlicer.exe" if os.name == "nt" else "PythonSlicer"
+    candidate = Path(slicer.app.slicerHome) / "bin" / exe
+    return str(candidate) if candidate.exists() else None
+
+
+def slicerTensorFlowInstalled():
+    """True if TensorFlow and tf-keras are installed in Slicer's Python (checked without importing them)."""
+    return all(importlib.util.find_spec(m) is not None for m in ("tensorflow", "tf_keras"))
+
+
+def installSlicerTensorFlow():
+    """pip-install TensorFlow + tf-keras into Slicer's Python without letting pip change numpy (other extensions
+    and Slicer itself depend on it). Returns (ok, message)."""
+    import numpy
+    numpyBefore = numpy.__version__
+    constraints = Path(tempfile.gettempdir()) / "SlicerSynthSeg_constraints.txt"
+    constraints.write_text(f"numpy=={numpyBefore}\n")
+    try:
+        slicer.util.pip_install(SLICER_TF_REQUIREMENTS + ["-c", str(constraints)])
+    except Exception as e:
+        return False, f"pip could not install {' '.join(SLICER_TF_REQUIREMENTS)} next to numpy {numpyBefore}:\n{e}"
+    finally:
+        constraints.unlink(missing_ok=True)
+    importlib.invalidate_caches()
+    if not slicerTensorFlowInstalled():
+        return False, "pip finished but TensorFlow / tf-keras cannot be found in Slicer's Python."
+    return True, f"Installed {' and '.join(SLICER_TF_REQUIREMENTS)} (numpy kept at {numpyBefore})."
+
+
+def downloadModelsWithProgress(parent, models_dir, names):
+    """Download the given model files into models_dir with a progress dialog. Returns (done, failed), lists of
+    "name: message" strings; raises DownloadCancelled if the user cancels."""
+    models_dir = Path(models_dir)
+    models_dir.mkdir(parents=True, exist_ok=True)
+    progress = qt.QProgressDialog("", "Cancel", 0, 100, parent)
+    progress.setWindowTitle("Downloading SynthSeg models")
+    progress.setWindowModality(qt.Qt.WindowModal)
+    progress.setMinimumDuration(0)
+    progress.show()
+    done, failed = [], []
+    try:
+        for i, name in enumerate(names, 1):
+            def cb(source, got, total, name=name, i=i):
+                progress.setLabelText(f"{name} ({i}/{len(names)}) from {source}\n"
+                                      f"{got / 2**20:.1f}" + (f" / {total / 2**20:.1f}" if total else "") + " MB")
+                if total:
+                    progress.setValue(int(got * 100 / total))
+                slicer.app.processEvents()
+                return not progress.wasCanceled
+            ok, msg = downloadModelFile(name, models_dir / name, cb)
+            (done if ok else failed).append(f"{name}: {msg}")
+    finally:
+        progress.close()
+    return done, failed
+
+
+def blockedDownloadHelp():
+    return ("If your network blocks these sites (common on university/hospital networks):\n"
+            f"1. On another connection, download the .h5 files from\n   {MODEL_RELEASE_PAGE}\n"
+            "2. In 'Configure Environment', click 'Import models from folder' and choose the folder with the files.")
+
+
 def findModelFolders():
     """Folders that may already hold SynthSeg models: $FREESURFER_HOME/models and, on Windows, a FreeSurfer
     installed inside WSL (wsl.localhost/DISTRO/home/USER/freesurfer/models)."""
@@ -195,17 +285,14 @@ class SlicerSynthSeg(ScriptedLoadableModule):
         self.parent.helpText = """
 Automated brain MRI segmentation using SynthSeg.
 <br><br>
-<b>Requirements:</b><br>
-1. SynthSeg installation (download from GitHub)<br>
-2. Python environment with TensorFlow, Keras, nibabel<br>
+<b>First run:</b> select a volume and click 'Run Segmentation'. The extension offers to install TensorFlow
+into Slicer's Python (about 600 MB, once) and downloads the SynthSeg models (about 50 MB each, checked with
+SHA-256). No conda environment is needed.<br>
 <br>
-<b>First-time setup:</b><br>
-Click 'Configure Environment' to set paths.<br>
+<b>Advanced:</b> 'Configure Environment' lets you use your own Python / conda environment instead, or import
+the models from a folder (for networks that block the download).<br>
 <br>
-<b>Models:</b> SynthSeg 1.0 can be downloaded from the configuration dialog. SynthSeg 2.0 and the cortical
-parcellation need synthseg_2.0.h5 and synthseg_parc_2.0.h5: use 'Import models from folder' in the
-configuration dialog and point it to your FreeSurfer models folder, or to the folder where you saved the
-files from the official SynthSeg download link.
+<b>Models:</b> by B. Billot, J.E. Iglesias et al., redistributed with their permission.
 """
         self.parent.acknowledgementText = """
 Based on SynthSeg by Benjamin Billot et al. Please cite Billot et al., Medical Image Analysis 2023;
@@ -278,7 +365,9 @@ class SlicerSynthSegWidget(ScriptedLoadableModuleWidget):
     def updateConfigurationStatus(self):
         if self.logic.isConfigured():
             config = self.logic.getConfiguration()
-            self.ui.configStatusLabel.text = f"✓ Configured\nSynthSeg: {config.get('synthseg_path', 'N/A')}\nPython: {config.get('python_path', 'N/A')}"
+            python = ("Slicer's own Python" + ("" if slicerTensorFlowInstalled() else " (TensorFlow is installed on first run)")
+                      if config['engine'] == "slicer" else config.get('python_path', 'N/A'))
+            self.ui.configStatusLabel.text = f"✓ Configured\nSynthSeg: {config.get('synthseg_path', 'N/A')}\nPython: {python}"
             self.ui.configStatusLabel.styleSheet = "color: green;"
         else:
             self.ui.configStatusLabel.text = "⚠ Not configured\nClick 'Configure Environment' to set paths"
@@ -310,6 +399,36 @@ class SlicerSynthSegWidget(ScriptedLoadableModuleWidget):
 
             if not self.logic.isConfigured():
                 raise ValueError("Please configure environment first!\nClick 'Configure Environment' button.")
+
+            if self.logic.needsTensorFlowInstall():
+                if not slicer.util.confirmOkCancelDisplay(
+                        "SynthSeg needs TensorFlow, which is not installed in Slicer's Python yet.\n\n"
+                        f"Install {' and '.join(SLICER_TF_REQUIREMENTS)} now? This downloads about 600 MB and "
+                        "takes a few minutes; it is done only once. numpy is kept at its current version so "
+                        "other extensions are not affected.",
+                        windowTitle="Install TensorFlow"):
+                    return
+                with slicer.util.WaitCursor():
+                    ok, msg = installSlicerTensorFlow()
+                if not ok:
+                    raise RuntimeError(msg)
+                self.updateConfigurationStatus()
+                slicer.util.infoDisplay(msg + "\n\nSegmentation will start now.")
+
+            models_dir, missing = self.logic.missingModels(self.currentMode())
+            if missing:
+                if not slicer.util.confirmOkCancelDisplay(
+                        f"{SYNTHSEG_MODES[self.currentMode()][0]} needs these model files, which are not downloaded yet:\n  "
+                        + "\n  ".join(missing) + "\n\nDownload them now (about 50 MB each, checked with SHA-256)?\n\n"
+                        "The models are by B. Billot, J.E. Iglesias et al. and are redistributed with their permission.",
+                        windowTitle="Download SynthSeg models"):
+                    return
+                try:
+                    done, failed = downloadModelsWithProgress(slicer.util.mainWindow(), models_dir, missing)
+                except DownloadCancelled:
+                    return
+                if failed:
+                    raise RuntimeError("Could not download:\n  " + "\n  ".join(failed) + "\n\n" + blockedDownloadHelp())
 
             self.ui.applyButton.enabled = False
             self.ui.applyButton.text = "Processing..."
@@ -352,8 +471,10 @@ class ConfigurationDialog(qt.QDialog):
 
         instructions = qt.QLabel(
             "<b>Setup Instructions:</b><br>"
-            "1. Download SynthSeg from: <a href='https://github.com/BBillot/SynthSeg'>GitHub</a><br>"
-            "2. Create a conda environment with TensorFlow, Keras, nibabel<br>"
+            "1. Default: SynthSeg runs in Slicer's own Python. TensorFlow is installed on the first run; "
+            "nothing else to set up.<br>"
+            "2. Advanced: choose 'Custom Python / conda environment' and give a Python that has TensorFlow, "
+            "Keras and nibabel (for example an existing conda environment)<br>"
             "3. Models: click 'Download models automatically' below (SynthSeg 1.0, 2.0 and cortical "
             "parcellation, about 50 MB each, checked with SHA-256).<br>"
             "&nbsp;&nbsp;&nbsp;If the download is blocked on your network, download the .h5 files from "
@@ -375,6 +496,12 @@ class ConfigurationDialog(qt.QDialog):
         importModelsButton.clicked.connect(self.onImportModels)
         layout.addRow(importModelsButton)
 
+        self.engineCombo = qt.QComboBox()
+        for key, label in ENGINE_LABELS.items():
+            self.engineCombo.addItem(label, key)
+        self.engineCombo.connect('currentIndexChanged(int)', self.onEngineChanged)
+        layout.addRow("Run SynthSeg with:", self.engineCombo)
+
         synthsegLayout = qt.QHBoxLayout()
         self.synthsegPathEdit = qt.QLineEdit()
         self.synthsegPathEdit.setPlaceholderText("C:/path/to/SynthSeg")
@@ -391,6 +518,7 @@ class ConfigurationDialog(qt.QDialog):
         pythonBrowseButton.clicked.connect(self.onBrowsePython)
         pythonLayout.addWidget(self.pythonPathEdit)
         pythonLayout.addWidget(pythonBrowseButton)
+        self.pythonBrowseButton = pythonBrowseButton
         layout.addRow("Python Executable:", pythonLayout)
 
         buttonLayout = qt.QHBoxLayout()
@@ -406,6 +534,19 @@ class ConfigurationDialog(qt.QDialog):
         config = self.logic.getConfiguration()
         self.synthsegPathEdit.setText(config.get('synthseg_path', ''))
         self.pythonPathEdit.setText(config.get('python_path', ''))
+        idx = self.engineCombo.findData(config.get('engine', 'slicer'))
+        self.engineCombo.setCurrentIndex(idx if idx >= 0 else 0)
+        self.onEngineChanged()
+
+    def currentEngine(self):
+        return self.engineCombo.itemData(self.engineCombo.currentIndex)
+
+    def onEngineChanged(self, index=None):
+        custom = self.currentEngine() == "custom"
+        self.pythonPathEdit.enabled = custom
+        self.pythonBrowseButton.enabled = custom
+        self.pythonPathEdit.setPlaceholderText("C:/anaconda3/envs/synthseg/python.exe" if custom
+                                               else "not needed: Slicer's own Python is used")
 
     def _ensurePackageInstalled(self, moduleName):
         """Import moduleName in Slicer's own Python, installing it via
@@ -456,39 +597,17 @@ class ConfigurationDialog(qt.QDialog):
                 return
             wanted = list(ALL_MODEL_FILES)
 
-        progress = qt.QProgressDialog("", "Cancel", 0, 100, self)
-        progress.setWindowTitle("Downloading SynthSeg models")
-        progress.setWindowModality(qt.Qt.WindowModal)
-        progress.setMinimumDuration(0)
-        progress.show()
-
-        done, failed = [], []
         try:
-            for i, name in enumerate(wanted, 1):
-                def cb(source, got, total, name=name, i=i):
-                    progress.setLabelText(f"{name} ({i}/{len(wanted)}) from {source}\n"
-                                          f"{got / 2**20:.1f}" + (f" / {total / 2**20:.1f}" if total else "") + " MB")
-                    if total:
-                        progress.setValue(int(got * 100 / total))
-                    slicer.app.processEvents()
-                    return not progress.wasCanceled
-                ok, msg = downloadModelFile(name, models_dir / name, cb)
-                (done if ok else failed).append(f"{name}: {msg}")
+            done, failed = downloadModelsWithProgress(self, models_dir, wanted)
         except DownloadCancelled:
-            progress.close()
             qt.QMessageBox.information(self, "Download cancelled", "Download cancelled. Nothing was saved for the current file.")
             return
-        finally:
-            progress.close()
 
         text = ""
         if done:
             text += "Downloaded and verified (SHA-256):\n  " + "\n  ".join(done) + "\n\n"
         if failed:
-            text += ("Could not download:\n  " + "\n  ".join(failed) + "\n\n"
-                     "If your network blocks these sites (common on university/hospital networks):\n"
-                     f"1. On another connection, download the .h5 files from\n   {MODEL_RELEASE_PAGE}\n"
-                     "2. Click 'Import models from folder' and choose the folder with the files.")
+            text += "Could not download:\n  " + "\n  ".join(failed) + "\n\n" + blockedDownloadHelp()
             qt.QMessageBox.warning(self, "Model download", text.strip())
         else:
             qt.QMessageBox.information(self, "Model download", text.strip() + f"\n\nSaved to:\n{models_dir}")
@@ -549,12 +668,14 @@ class ConfigurationDialog(qt.QDialog):
     def onSave(self):
         synthseg_path = self.synthsegPathEdit.text.strip()
         python_path = self.pythonPathEdit.text.strip()
+        engine = self.currentEngine()
 
-        if not synthseg_path or not python_path:
-            qt.QMessageBox.warning(self, "Missing Information", "Please provide both paths!")
+        if not synthseg_path or (engine == "custom" and not python_path):
+            qt.QMessageBox.warning(self, "Missing Information",
+                                   "Please provide the SynthSeg path" + (" and the Python executable!" if engine == "custom" else "!"))
             return
 
-        result, message = self.logic.validateAndSaveConfiguration(synthseg_path, python_path)
+        result, message = self.logic.validateAndSaveConfiguration(synthseg_path, python_path, engine)
         if result:
             self.accept()
         else:
@@ -585,17 +706,38 @@ class SlicerSynthSegLogic(ScriptedLoadableModuleLogic):
             logging.error(f"Failed to load SynthSegConfig: {e}")
             self.config = None
 
-    def isConfigured(self):
-        if self.config is None:
-            return False
-        return self.config.is_configured()
-
     def getConfiguration(self):
-        if self.config:
-            return self.config.get_config()
-        return {}
+        """Saved configuration; with nothing saved yet, the default: Slicer's Python + the bundled SynthSeg."""
+        config = dict(self.config.get_config()) if self.config else {}
+        # A configuration saved before engines existed has a python_path and no engine: it keeps using that
+        # external Python. Decided here (not only in synthseg_config) so an existing conda setup is never
+        # switched to Slicer's Python, whichever version of the helper module is loaded.
+        if config.get('engine') not in ENGINE_LABELS:
+            config['engine'] = "custom" if config.get('python_path') else "slicer"
+        if not config.get('synthseg_path'):
+            bundled = bundledSynthSegPath()
+            if bundled:
+                config['synthseg_path'] = str(bundled)
+        config.setdefault('python_path', '')
+        return config
 
-    def validateAndSaveConfiguration(self, synthseg_path, python_path):
+    def isConfigured(self):
+        config = self.getConfiguration()
+        if not config.get('synthseg_path') or not os.path.exists(config['synthseg_path']):
+            return False
+        if config['engine'] == "custom":
+            return bool(config.get('python_path')) and os.path.exists(config['python_path'])
+        return True
+
+    def missingModels(self, mode):
+        """Model files the given mode needs that are not in SynthSeg/models yet: (models_dir, [names])."""
+        models_dir = Path(self.getConfiguration()['synthseg_path']) / "models"
+        return models_dir, [m for m in SYNTHSEG_MODES[mode][2] if not (models_dir / m).exists()]
+
+    def needsTensorFlowInstall(self):
+        return self.getConfiguration()['engine'] == "slicer" and not slicerTensorFlowInstalled()
+
+    def validateAndSaveConfiguration(self, synthseg_path, python_path, engine="slicer"):
         if self.config is None:
             try:
                 from SlicerSynthSegLib.synthseg_config import SynthSegConfig
@@ -607,7 +749,7 @@ class SlicerSynthSegLogic(ScriptedLoadableModuleLogic):
         if not valid:
             return False, f"SynthSeg path invalid: {msg}"
 
-        self.config.save_config(synthseg_path, python_path)
+        self.config.save_config(synthseg_path, python_path, engine)
 
         return True, "Configuration saved"
 
@@ -621,20 +763,37 @@ class SlicerSynthSegLogic(ScriptedLoadableModuleLogic):
         if not valid:
             return False, f"SynthSeg: {msg}"
 
-        valid, msg = self.config.validate_python_env(config['python_path'])
-        if not valid:
-            return False, f"Python: {msg}"
+        if config['engine'] == "slicer":
+            if not pythonSlicerPath():
+                return False, "Python: PythonSlicer executable not found in this Slicer installation"
+            tf = ("TensorFlow installed in Slicer's Python" if slicerTensorFlowInstalled()
+                  else "TensorFlow not installed yet: it is installed on the first run (about 600 MB)")
+            return True, f"SynthSeg: {msg}\nPython: Slicer's own Python\n{tf}"
 
-        return True, "All checks passed!"
+        valid, msg2 = self.config.validate_python_env(config['python_path'])
+        if not valid:
+            return False, f"Python: {msg2}"
+
+        return True, f"SynthSeg: {msg}\nPython: {config['python_path']}"
 
     def _resolveAndValidatePaths(self, mode="v1"):
         """Re-validate python.exe / SynthSeg_predict.py / model right before running,
         in case the on-disk state changed since the config was saved."""
         config = self.getConfiguration()
 
-        python_path = Path(config['python_path'])
-        if not python_path.exists():
-            raise RuntimeError(f"Python executable not found: {python_path}")
+        if config['engine'] == "slicer":
+            python_slicer = pythonSlicerPath()
+            if not python_slicer:
+                raise RuntimeError("PythonSlicer executable not found in this Slicer installation.")
+            if not slicerTensorFlowInstalled():
+                raise RuntimeError("TensorFlow is not installed in Slicer's Python yet. Click 'Run Segmentation' "
+                                   "again and accept the installation, or choose a custom Python in 'Configure Environment'.")
+            python_cmd = [python_slicer, str(MODULE_DIR / "SlicerSynthSegLib" / "run_synthseg_tfkeras.py")]
+        else:
+            python_path = Path(config['python_path'])
+            if not python_path.exists():
+                raise RuntimeError(f"Python executable not found: {python_path}")
+            python_cmd = [str(python_path)]
 
         synthseg_path = Path(config['synthseg_path'])
         predict_script = synthseg_path / "scripts" / "commands" / "SynthSeg_predict.py"
@@ -653,7 +812,7 @@ class SlicerSynthSegLogic(ScriptedLoadableModuleLogic):
                 "or the files downloaded from the official SynthSeg link)."
             )
 
-        return python_path, predict_script
+        return python_cmd, config['engine'], predict_script
 
     def _labelNames(self, mode):
         """Label names for the chosen model: the fixed v1 table, or the names shipped with SynthSeg
@@ -722,7 +881,7 @@ class SlicerSynthSegLogic(ScriptedLoadableModuleLogic):
 
         if mode not in SYNTHSEG_MODES:
             mode = "v1"
-        python_path, predict_script = self._resolveAndValidatePaths(mode)
+        python_cmd, engine, predict_script = self._resolveAndValidatePaths(mode)
 
         with tempfile.TemporaryDirectory() as tmpDir:
             tmpPath = Path(tmpDir)
@@ -733,8 +892,8 @@ class SlicerSynthSegLogic(ScriptedLoadableModuleLogic):
             segPath = tmpPath / 'segmentation.nii.gz'
             volCsvPath = tmpPath / 'volumes.csv'
 
-            cmd = [
-                str(python_path), str(predict_script),
+            cmd = python_cmd + [
+                str(predict_script),
                 "--i", str(inputPath),
                 "--o", str(segPath),
                 "--vol", str(volCsvPath),
@@ -742,13 +901,18 @@ class SlicerSynthSegLogic(ScriptedLoadableModuleLogic):
                 "--threads", SYNTHSEG_THREADS,
             ] + SYNTHSEG_MODES[mode][1]
 
-            env = os.environ.copy()
+            if engine == "slicer":
+                # PythonSlicer needs Slicer's own startup environment (its Python paths)
+                env = dict(slicer.util.startupEnvironment())
+                env["TF_USE_LEGACY_KERAS"] = "1"
+            else:
+                env = os.environ.copy()
+                # Slicer's embedded Python sets these to point at its own stdlib;
+                # left in place, the conda python.exe tries to load Slicer's io.py
+                # instead of its own and crashes at interpreter startup.
+                for var in ("PYTHONHOME", "PYTHONPATH", "PYTHONSTARTUP"):
+                    env.pop(var, None)
             env["KMP_DUPLICATE_LIB_OK"] = "TRUE"
-            # Slicer's embedded Python sets these to point at its own stdlib;
-            # left in place, the conda python.exe tries to load Slicer's io.py
-            # instead of its own and crashes at interpreter startup.
-            for var in ("PYTHONHOME", "PYTHONPATH", "PYTHONSTARTUP"):
-                env.pop(var, None)
 
             logging.info("Running: %s", " ".join(cmd))
 

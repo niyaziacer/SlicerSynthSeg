@@ -36,13 +36,15 @@ class SynthSegConfig:
                 pass
         return {}
 
-    def save_config(self, synthseg_path, python_path):
-        """Save configuration to file"""
+    def save_config(self, synthseg_path, python_path, engine="slicer"):
+        """Save configuration to file. engine: "slicer" (Slicer's own Python + TensorFlow installed with pip)
+        or "custom" (an external Python, e.g. a conda environment, given by python_path)."""
         self.config_file.parent.mkdir(parents=True, exist_ok=True)
 
         config = {
+            'engine': engine,
             'synthseg_path': str(synthseg_path),
-            'python_path': str(python_path)
+            'python_path': str(python_path or "")
         }
 
         with open(self.config_file, 'w') as f:
@@ -80,15 +82,21 @@ class SynthSegConfig:
         return True, "Python environment valid"
 
     def get_config(self):
-        """Get current configuration"""
-        return self.config
+        """Get current configuration. A configuration saved before engines existed had a python_path and
+        no engine: it keeps using that external Python ("custom"), so existing setups do not change."""
+        config = dict(self.config)
+        if 'engine' not in config:
+            config['engine'] = "custom" if config.get('python_path') else "slicer"
+        return config
 
     def is_configured(self):
         """Check if environment is configured"""
-        return ('synthseg_path' in self.config and
-                'python_path' in self.config and
-                os.path.exists(self.config['synthseg_path']) and
-                os.path.exists(self.config['python_path']))
+        config = self.get_config()
+        if not config.get('synthseg_path') or not os.path.exists(config['synthseg_path']):
+            return False
+        if config['engine'] == "custom":
+            return bool(config.get('python_path')) and os.path.exists(config['python_path'])
+        return True
 
 
 def test_configuration():
@@ -101,6 +109,7 @@ def test_configuration():
 
     current_config = config.get_config()
     print(f"SynthSeg path: {current_config['synthseg_path']}")
+    print(f"Engine: {current_config['engine']}")
     print(f"Python path: {current_config['python_path']}")
 
     valid, msg = config.validate_synthseg_path(current_config['synthseg_path'])
@@ -108,6 +117,10 @@ def test_configuration():
 
     if not valid:
         return False
+
+    if current_config['engine'] == "slicer":
+        print("Python: Slicer's own Python")
+        return True
 
     valid, msg = config.validate_python_env(current_config['python_path'])
     print(f"Python validation: {msg}")
